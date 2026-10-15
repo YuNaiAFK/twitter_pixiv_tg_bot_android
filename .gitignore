@@ -1,0 +1,25 @@
+# Secrets and credentials - never commit these.
+.env
+cookies/
+*.session
+authorized.json
+parse_cache.json
+gallery-dl.conf
+
+# Runtime state.
+.bot.lock
+restart.log
+restart.log.1
+data/
+.cache/
+.downloads/
+.gallery-dl-cache/
+__pycache__/
+*.pyc
+
+# The self-hosted Bot API server's own storage. Large, and rebuilt automatically.
+telegram-bot-api/
+
+# Local virtualenvs, if one is ever created on a desktop for testing.
+.venv/
+venv/

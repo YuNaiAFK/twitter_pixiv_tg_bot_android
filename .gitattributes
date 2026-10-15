@@ -1,0 +1,21 @@
+# Line endings matter here in a way they usually do not.
+#
+# The shell scripts are run on Android. A CRLF shebang fails with
+# "bad interpreter: /data/data/.../bash^M: no such file or directory", which is a confusing
+# error for a file that looks correct in an editor - and git's `core.autocrlf` on Windows
+# rewrites them on checkout without asking.
+#
+# `text eol=lf` stores them with LF and checks them out with LF on every platform, so the
+# scripts survive a round trip through a Windows working copy. Editing them on Windows needs
+# an editor that preserves LF; most do, and git will convert on commit if it does not.
+*.sh   text eol=lf
+
+# Python is not picky, but the same rule keeps the tree stable between the two machines.
+*.py   text eol=lf
+
+# Binary, never touched.
+*.png  binary
+*.jpg  binary
+*.webp binary
+*.zip  binary
+*.sqlite3 binary
