@@ -1,27 +1,34 @@
-Detect the container with proot-distro itself, and fix its install syntax
+Scrub the inherited Termux paths before configuring TDLib
 
-Re-running the build failed with:
+The build died at 3% compiling sqlite3.c with errors from Termux's Android headers:
 
-    Error: container 'botapi' already exists. Specify a different name with '--name NAME'.
+    /data/data/com.termux/files/usr/include/android/api-level.h:201: error: 'strict' undeclared
+    /data/data/com.termux/files/usr/include/sys/cdefs.h:365: #error Unversioned target triples
+    /data/data/com.termux/files/usr/include/string.h:44: error: expected '=' before 'memccpy'
 
-The container was fine; the script could not see it. proot-distro 5.x keeps the rootfs at
+None of those files has anything to do with sqlite. The generated flags.make said why:
 
-    $PROOT_BASE/containers/<name>/rootfs
+    C_INCLUDES = -I/opt/telegram-bot-api/td/sqlite -isystem /data/data/com.termux/files/usr/include
 
-while the script only looked at the 4.x location,
+Using Debian's gcc with Termux's bionic headers cannot work. The path arrived through
+pkg-config: TDLib's CMake asks it for the OpenSSL location, Termux's PKG_CONFIG_PATH was
+inherited into the chroot, and pkg-config answered with the host's copy. CMakeCache.txt recorded
+it in a dozen places:
 
-    $PROOT_BASE/installed-rootfs/<name>
+    OPENSSL_INCLUDE_DIR:PATH        = /data/data/com.termux/files/usr/include
+    OPENSSL_CRYPTO_LIBRARY:FILEPATH = /data/data/com.termux/files/usr/lib/libcrypto.so
+    _OPENSSL_CFLAGS:INTERNAL        = -I/data/data/com.termux/files/usr/include
+    _OPENSSL_PREFIX:INTERNAL        = /data/data/com.termux/files/usr
 
-So the -d test failed, the script decided to install again, and proot-distro refused because the
-container it was about to create already existed. Measured on the device: 658 MB under
-containers/botapi/rootfs, with manifest.json beside it, and `proot-distro list` naming botapi.
+Four changes, because either half alone is not enough:
 
-Three changes:
+  - PKG_CONFIG_PATH, PKG_CONFIG_LIBDIR, CPATH, C_INCLUDE_PATH, CPLUS_INCLUDE_PATH,
+    LIBRARY_PATH, LD_LIBRARY_PATH, LD_PRELOAD, CMAKE_*_PATH, CFLAGS and friends are unset
+  - PATH is set to the chroot's own directories only, since /usr/bin/cc exists in Termux too
+  - CC and CXX are pinned to /usr/bin/gcc and /usr/bin/g++, passed to cmake explicitly
+  - `rm -rf build` before configuring: CMake caches its detection, so a stale cache reproduces
+    the failure even after the environment is fixed
 
-  - both layouts are checked, so either version works, and PROOT_BASE can be overridden if a
-    later release moves it again
-  - the decision now asks `proot-distro list` first, which is authoritative and does not depend
-    on any path; the path test remains only as a fallback
-  - `install --name=NAME debian:stable` - 5.x documents the name as an option and the argument
-    slot as the image reference: `install [OPTIONS] (IMAGE:TAG or URL or FILE)`. The tag is
-    explicit so a future `latest` cannot silently change the base.
+Two guards were added. pkg-config's answer for openssl is printed and rejected if it is under
+/data/data/com.termux, and after configuring the build files are grepped for a Termux include
+path, so this class of failure is caught in seconds instead of twenty minutes into a compile.

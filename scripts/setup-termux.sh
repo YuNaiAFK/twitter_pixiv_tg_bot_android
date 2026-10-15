@@ -308,6 +308,42 @@ rm -rf /opt/telegram-bot-api
 git clone --depth 1 https://github.com/tdlib/telegram-bot-api.git /opt/telegram-bot-api
 cd /opt/telegram-bot-api
 
+# **Scrub the Termux environment before configuring.**
+#
+# This is the bug that made the first build die at 3%, and its symptom points nowhere near its
+# cause. TDLib's CMake asks pkg-config where OpenSSL is. Termux's PKG_CONFIG_PATH was inherited
+# into the chroot, so pkg-config answered with **Termux's** OpenSSL, and CMake baked it in:
+#
+#     OPENSSL_INCLUDE_DIR:PATH        = /data/data/com.termux/files/usr/include
+#     OPENSSL_CRYPTO_LIBRARY:FILEPATH = /data/data/com.termux/files/usr/lib/libcrypto.so
+#     _OPENSSL_CFLAGS:INTERNAL        = -I/data/data/com.termux/files/usr/include
+#
+# which produced `-isystem /data/data/com.termux/files/usr/include` on every compile line. Using
+# Debian's gcc with Termux's Android/bionic headers cannot work, so sqlite3.c failed with errors
+# from android/api-level.h, sys/cdefs.h and string.h - files that have nothing to do with sqlite.
+#
+# Both halves have to go: the variables that carry the paths in, and any build directory that
+# already recorded them. CMake caches the detection results, so a stale cache reproduces the
+# failure even after the environment is fixed.
+for v in PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR \
+         CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH \
+         LIBRARY_PATH LD_LIBRARY_PATH LD_PRELOAD \
+         CMAKE_PREFIX_PATH CMAKE_INCLUDE_PATH CMAKE_LIBRARY_PATH \
+         CFLAGS CXXFLAGS LDFLAGS CPPFLAGS; do
+    unset "$v" 2>/dev/null || true
+done
+# An empty PATH entry or one pointing outside the chroot would let the host's tools be used.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Be explicit about the compiler rather than letting CMake search: /usr/bin/cc exists in Termux
+# too, so an unqualified search could resolve outside the chroot.
+export CC=/usr/bin/gcc
+export CXX=/usr/bin/g++
+echo "    scrubbed inherited paths (PKG_CONFIG_PATH, CPATH, LD_LIBRARY_PATH, ...)"
+
+# Remove any build tree that recorded the old detection. Cheap insurance: a stale CMakeCache
+# with Termux paths in it fails identically to the original bug.
+rm -rf build
+
 # **`td` is a git submodule, and without it CMake fails in a way that names the wrong thing.**
 #
 # The top-level CMakeLists.txt does:
@@ -335,9 +371,33 @@ if [ ! -f td/CMake/PreventInSourceBuild.cmake ]; then
 fi
 echo "    submodules present"
 
+# Report what pkg-config now says, so a future recurrence is visible immediately rather than
+# showing up as unrelated compiler errors twenty minutes later.
+if command -v pkg-config >/dev/null 2>&1; then
+    echo "    pkg-config resolves openssl to:"
+    pkg-config --variable=includedir openssl 2>/dev/null | sed 's/^/      include: /' || echo "      (openssl.pc not found)"
+    case "$(pkg-config --variable=includedir openssl 2>/dev/null || true)" in
+        /data/data/com.termux/*)
+            echo "ERROR: pkg-config is still reporting a Termux path. The build would fail."
+            exit 1 ;;
+    esac
+fi
+
 # CMAKE_BUILD_TYPE=Release and the install prefix are set on the configure line; the build
 # target is built separately so a failure names the step.
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local \
+      -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
+
+# Guard against the exact regression that caused the original failure: if any compile line still
+# names a Termux include directory, stop before spending half an hour on it.
+if grep -rq 'isystem /data/data/com.termux' build 2>/dev/null; then
+    echo "ERROR: the generated build files still contain a Termux include path:"
+    grep -rh -m2 'isystem /data/data/com.termux[^ ]*' build 2>/dev/null | head -3 | sed 's/^/      /'
+    echo "       Refusing to build; the result could not compile."
+    exit 1
+fi
+echo "    no Termux paths in the generated build files"
+
 # -j2 deliberately: a phone has 8 cores but thermal-throttles, and a killed build wastes far
 # more time than a slower one.
 cmake --build build --target install -j2
