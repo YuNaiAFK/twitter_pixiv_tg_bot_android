@@ -12,7 +12,6 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -315,15 +314,20 @@ public class MainActivity extends Activity {
         logView.setBackground(logBg);
         logView.setText("載入中…");
 
-        // A fixed-height scroller: the log must scroll inside its own box rather than pushing the
-        // buttons off the screen, which is what happens when it grows the page.
-        ScrollView logScroll = new ScrollView(this);
-        logScroll.addView(logView);
+        // **A fixed-height TextView that scrolls itself, rather than a TextView inside a
+        // ScrollView.** The nested version looked right but never followed the tail: fullScroll()
+        // on the outer ScrollView ran before the new text had been measured, so the view stayed
+        // where it was - and on a log that only ever grows, that means the oldest lines. In
+        // practice a Traceback from hours earlier filled the box while the newest, healthy lines
+        // sat below the fold, which reads as "the bot is broken".
+        //
+        // Scrolling the TextView directly, with the target computed from its own layout, is
+        // exact, and it keeps touch scrolling and text selection.
         LinearLayout.LayoutParams logParams =
-                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(240));
+                new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(260));
         logParams.setMargins(dp(3), dp(3), dp(3), dp(3));
-        logScroll.setLayoutParams(logParams);
-        root.addView(logScroll);
+        logView.setLayoutParams(logParams);
+        root.addView(logView);
 
         root.addView(section("工具"));
         root.addView(row(
@@ -527,10 +531,17 @@ public class MainActivity extends Activity {
                     logView.setText(rendered);
                     logMeta.setText(bytes(size));
                     // Jump to the newest line, which is what anyone watching wants to see.
-                    if (logView.getParent() instanceof ScrollView) {
-                        final ScrollView scroller = (ScrollView) logView.getParent();
-                        scroller.post(() -> scroller.fullScroll(View.FOCUS_DOWN));
-                    }
+                    //
+                    // Posted rather than immediate: the layout must be recomputed for the new
+                    // text before the bottom has a position to scroll to, and computing it from
+                    // getLayout() is why this survives a long log instead of stopping partway.
+                    logView.post(() -> {
+                        if (logView.getLayout() == null) return;
+                        int content = logView.getLayout().getLineTop(logView.getLineCount());
+                        int bottom = Math.max(0, content - logView.getHeight()
+                                + logView.getPaddingTop() + logView.getPaddingBottom());
+                        logView.scrollTo(0, bottom);
+                    });
                 });
             } catch (Exception ignored) {
                 // The banner already reports an unreachable panel; repeating it here would
