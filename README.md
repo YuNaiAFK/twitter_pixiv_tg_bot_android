@@ -520,3 +520,30 @@ intent alone.
 
 `--stop` reverses the startup order for the mirror-image reason: the bot is stopped before the
 server it depends on, and the panel goes last so a control surface exists until the very end.
+
+
+## Credits
+
+[CREDITS.md](CREDITS.md) lists every project this is built on - Termux and its companion apps,
+proot-distro, the Python libraries, TDLib, the Android build tools - with a link to each
+project's own page, the version that was in use, and what it does here.
+
+These are the pages to go to if you are rebuilding this:
+
+| | |
+| --- | --- |
+| Termux | <https://github.com/termux/termux-app> · <https://termux.dev> · [F-Droid](https://f-droid.org/packages/com.termux/) |
+| Termux:API | <https://github.com/termux/termux-api> · [F-Droid](https://f-droid.org/packages/com.termux.api/) |
+| Termux:Boot | <https://github.com/termux/termux-boot> · [F-Droid](https://f-droid.org/packages/com.termux.boot/) |
+| python-telegram-bot | <https://github.com/python-telegram-bot/python-telegram-bot> · <https://python-telegram-bot.org> |
+| gallery-dl | <https://github.com/mikf/gallery-dl> |
+| httpx | <https://github.com/encode/httpx> |
+| Pillow | <https://github.com/python-pillow/Pillow> |
+| Telegram Bot API server | <https://github.com/tdlib/telegram-bot-api> |
+| TDLib | <https://github.com/tdlib/td> |
+| proot-distro | <https://github.com/termux/proot-distro> |
+| Android SDK | <https://developer.android.com/studio#command-line-tools-only> |
+| Eclipse Temurin JDK | <https://adoptium.net> |
+
+Nothing here is bundled except the APKs in `apk/`, and this project is not affiliated with any of
+those projects.
