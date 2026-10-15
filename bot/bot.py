@@ -6932,11 +6932,19 @@ def _download_archive_parallel(headers: dict, download_url: str, target: Path,
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(fetch_range, enumerate(ranges, 1)))
 
-    # Checked before the stop test on purpose. A genuine stop leaves a partial file,
-    # which the caller discards - but **nothing at all** written is not a partial
-    # download, it is a failed one, and reporting it as a short read would let the
-    # caller send a 0-byte archive. That is what happened when an expired archive URL
-    # made every range fail while a stop was arriving.
+    # **A stop is tested before the nothing-written test, and the order is the whole point.**
+    #
+    # Both conditions are true when a user presses stop early: no bytes have arrived yet, and
+    # the stop flag is set. Testing `written == 0` first made that case report
+    # "下載連結可能已過期，請重新取得" - a wrong diagnosis that sends the user off to re-request
+    # an archive that was never broken. Measured on the phone: stopped 0.09 s into a 114.3 MiB
+    # download, and the log blamed an expired link.
+    #
+    # The `written == 0` check still has to exist for the case it was written for: every range
+    # failing on its own, with no stop, means the URL really is dead, and returning a short read
+    # there would let the caller send a 0-byte archive.
+    if stopped() and written == 0:
+        return written
     if written == 0:
         raise ehentai.EhentaiError(
             "官方歸檔沒有任何分段下載成功（下載連結可能已過期，請重新取得）。")

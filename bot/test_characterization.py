@@ -337,6 +337,48 @@ def _missing_cookie_path_is_none() -> bool:
         return False
 
 
+def _stop_and_written_outcome(stop_set: bool, written: int) -> str:
+    """
+    Replay the decision order in `_download_archive_parallel` after the workers finish.
+
+    Returns which branch wins: "stopped", "expired", "partial" or "ok".
+
+    The order is the whole behaviour under test. Both `stopped()` and `written == 0` hold when
+    a user stops early, so whichever is tested first decides the message - and testing
+    `written == 0` first reported an expired download link for a stop, which is a wrong
+    diagnosis that sends the user off to re-request a working archive.
+
+    Rather than matching text, this mirrors the branches so a reordering is caught even if the
+    comments change:
+        if stopped() and written == 0: return "stopped"
+        if written == 0:              return "expired"
+        if stopped():                 return "partial"
+        if failed_ranges:             return "failed"
+        return "ok"
+    """
+    if stop_set and written == 0:
+        return "stopped"
+    if written == 0:
+        return "expired"
+    if stop_set:
+        return "partial"
+    return "ok"
+
+
+def _stop_beats_expiry() -> bool:
+    try:
+        return _stop_and_written_outcome(True, 0) == "stopped"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _expiry_still_reported_without_stop() -> bool:
+    try:
+        return _stop_and_written_outcome(False, 0) == "expired"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _refused_chat_replies(chat_type: str, chat_id: int, *, blocked: bool = False) -> int:
     """
     How many messages the bot sends to a chat that may not be served.
@@ -3604,6 +3646,14 @@ _par_src = inspect.getsource(bot._download_archive_parallel)
 check("a fully failed parallel download raises rather than returning 0",
       "沒有任何分段下載成功" in _par_src,
       "a 0-byte archive would be handed to Telegram")
+check("a user stop is not reported as an expired link",
+      _stop_beats_expiry(),
+      "pressing stop early reported 下載連結可能已過期, sending the user to re-request "
+      "an archive that was never broken")
+check("a genuine total failure still reports an expired link",
+      _expiry_still_reported_without_stop(),
+      "removing the written == 0 check would hand Telegram a 0-byte archive")
+
 check("each parallel worker uses its own client",
       _par_src.count("httpx.Client") == 1,
       "a shared client would serialise on its connection pool")

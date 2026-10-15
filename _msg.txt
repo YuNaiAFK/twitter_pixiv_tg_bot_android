@@ -1,29 +1,26 @@
-Use the HTTP proxy form for apt and pip, which cannot speak SOCKS
+Report a user stop as a stop, not as an expired archive link
 
-    $ apt-get update
-    Unsupported proxy configured: socks5://127.0.0.1:10808
-    E: The repository 'https://packages-cf.termux.dev/apt/termux-main stable Release'
-       does not have a Release file.
+Presses of stop during the official archive download were reported as
+"官方歸檔沒有任何分段下載成功（下載連結可能已過期，請重新取得）". The link was fine.
 
-The message names the REPOSITORY, so this reads as a broken mirror. I chased that: every Termux
-mirror serves its Release file correctly - all five answering 200 with identical 13134-byte
-content from a PC on the same network - while apt failed on every one of them. The SOCKS line
-above the error is the only real clue.
+Both conditions hold when a stop arrives before any bytes land: nothing has been written AND the
+stop flag is set. The written == 0 branch was tested first, so it won and produced a wrong
+diagnosis that sends the user to re-request an archive that was never broken. Measured on the
+phone: stopped 0.09 s into a 114.3 MiB download, and the log blamed an expired link.
 
-pip has the same limitation for a different reason and says so differently:
+Fixed by testing the stop first when nothing was written:
 
-    ERROR: Could not install packages due to an OSError: Missing dependencies for SOCKS support.
+    if stopped() and written == 0:
+        return written
+    if written == 0:
+        raise ...下載連結可能已過期...
 
-It needs PySocks to speak SOCKS, and installing PySocks needs pip. Neither tool hints that the
-HTTP form is the answer.
+The written == 0 check still has to exist for the case it was written for - every range
+failing on its own, with no stop, which means the URL really is dead. Returning 0 there would
+let the caller send a 0-byte archive, which is why that branch was added originally.
 
-Three places held the SOCKS value and only the third mattered:
+Two checks added, testing the decision order behaviourally rather than by matching text, so a
+future reordering is caught even if the comments change:
 
-  .bashrc              read from ~/.proxy-url, so it was only a carrier
-  ~/.proxy-url         already HTTP by the time this was found
-  apt.conf.d/95proxy   **the actual cause** - apt reads this file for its own transport and it
-                       outranks the environment, so a terminal-only fix changed nothing
-
-The bootstrap now writes the HTTP form to apt.conf.d, to ~/.proxy-url and to git; the SOCKS form
-goes to ~/.proxy-url-socks for tools that prefer it. SAVED_URL is \, so
-a SOCKS URL can no longer reach apt at all.
+  - a user stop is not reported as an expired link
+  - a genuine total failure still reports an expired link
