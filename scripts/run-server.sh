@@ -15,12 +15,45 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX_TERMUX="${PREFIX:-/data/data/com.termux/files/usr}"
 CHROOT_NAME="${CHROOT_NAME:-botapi}"
-CHROOT_ROOT="${CHROOT_ROOT:-$PREFIX_TERMUX/var/lib/proot-distro/installed-rootfs/$CHROOT_NAME}"
+PROOT_BASE="${PROOT_BASE:-$PREFIX_TERMUX/var/lib/proot-distro}"
 API_PORT="${API_PORT:-8081}"
 RUN_DIR="$PROJECT_DIR/data"
 PID_FILE="$RUN_DIR/bot-api.pid"
 LOG_FILE="$RUN_DIR/bot-api.log"
+
+# **The rootfs moved in proot-distro 5.x, and the binary must be run through proot.**
+#
+# Two separate problems, both of which made this script useless as written:
+#
+#   1. The path. 5.x keeps the rootfs at containers/<name>/rootfs; 4.x used
+#      installed-rootfs/<name>. Only the old path was checked, so the script reported
+#      "binary missing" for a binary that was there.
+#
+#   2. The binary cannot be executed directly. Its interpreter is
+#      /lib/ld-linux-aarch64.so.1 - Debian's glibc loader. Android has /system/bin/linker64
+#      instead, so running it gives "cannot execute: required file not found", which reads like
+#      a missing file rather than the wrong loader. It has to go through `proot-distro login`,
+#      which supplies the chroot's loader and libraries.
+#
+# The loopback is shared: measured from the Termux app, a listener started inside the chroot on
+# 0.0.0.0:8099 accepted a connection from Termux, so the bot can reach this server at
+# 127.0.0.1:$API_PORT even though it lives outside the chroot.
+#
+# **Run this script from the Termux app, never through `su`.** A process started with
+# `su 10209` lands in the SELinux domain u:r:magisk:s0, where creating a socket fails with
+# PermissionError / "socket: Permission denied" - the network looks broken when it is not.
+if [ -d "$PROOT_BASE/containers/$CHROOT_NAME/rootfs" ]; then
+    CHROOT_ROOT="$PROOT_BASE/containers/$CHROOT_NAME/rootfs"
+else
+    CHROOT_ROOT="${CHROOT_ROOT:-$PROOT_BASE/installed-rootfs/$CHROOT_NAME}"
+fi
 BINARY="$CHROOT_ROOT/usr/local/bin/telegram-bot-api"
+
+# The server's working directory, as seen from inside the chroot. `--dir` is validated with
+# realpath and the server refuses to start if it does not already exist, so it is created from
+# Termux and referenced by its chroot path.
+SERVER_DIR_CHROOT="/root/telegram-bot-api"
+SERVER_DIR_HOST="$CHROOT_ROOT/root/telegram-bot-api"
 
 say() { printf '\033[1m%s\033[0m\n' "$1"; }
 ok()  { printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -97,17 +130,26 @@ cmd_start() {
     fi
     [ -x "$BINARY" ] || { bad "binary missing at $BINARY - run setup-termux.sh"; exit 1; }
 
-    mkdir -p "$RUN_DIR"
+    # The server validates --dir with realpath and will not create it, so it has to exist first.
+    # Creating it from Termux is what makes it owned by the Termux user, which is the same user
+    # the chroot runs as.
+    mkdir -p "$RUN_DIR" "$SERVER_DIR_HOST"
+
     say "Starting the Bot API server on :$API_PORT"
     # --local is what allows an upload by file path, which is the whole reason for running
     # this at all: the bot hands Telegram a path on disk instead of re-uploading bytes.
     # --dir is where Telegram stores the downloaded files, so it must be writable and large.
-    nohup setsid "$BINARY" \
+    #
+    # `proot-distro login` is required, not optional: see the note at the top about the loader.
+    # The pid recorded is proot's, which is the process that stays alive; stopping it takes the
+    # server down with it, which is what cmd_stop relies on.
+    nohup setsid proot-distro login "$CHROOT_NAME" -- \
+        /usr/local/bin/telegram-bot-api \
         --api-id="$API_ID" \
         --api-hash="$API_HASH" \
         --local \
         --http-port="$API_PORT" \
-        --dir="$RUN_DIR/telegram-bot-api" \
+        --dir="$SERVER_DIR_CHROOT" \
         >>"$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
 
@@ -125,6 +167,7 @@ cmd_start() {
 }
 
 cmd_stop() {
+    local pid
     if pid=$(running_pid); then
         say "Stopping pid $pid"
         kill "$pid" 2>/dev/null || true
@@ -137,6 +180,22 @@ cmd_stop() {
     else
         no "not running"
     fi
+
+    # **The pid is proot's, and killing proot can leave the server behind.**
+    #
+    # proot runs telegram-bot-api as a child; whether the child dies with the parent depends on
+    # timing, and a survivor keeps the port bound, so the next start fails with "port 8081 is
+    # already in use by something else" - a misleading message, because the something is this
+    # script's own previous run. So anything still holding the server is cleaned up explicitly.
+    if pgrep -f 'telegram-bot-api.*--http-port=' >/dev/null 2>&1; then
+        no "a server process survived; stopping it too"
+        pkill -f 'telegram-bot-api.*--http-port=' 2>/dev/null || true
+        sleep 1
+        pkill -9 -f 'telegram-bot-api.*--http-port=' 2>/dev/null || true
+    fi
+    # A proot wrapper with no server left underneath would also keep the pid file stale.
+    pkill -f "proot-distro login $CHROOT_NAME" 2>/dev/null || true
+
     rm -f "$PID_FILE"
 }
 

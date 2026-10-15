@@ -1,34 +1,30 @@
-Scrub the inherited Termux paths before configuring TDLib
+Start the Bot API server through proot, and find the rootfs where 5.x puts it
 
-The build died at 3% compiling sqlite3.c with errors from Termux's Android headers:
+Two independent faults made this script unusable, both reported as the wrong thing.
 
-    /data/data/com.termux/files/usr/include/android/api-level.h:201: error: 'strict' undeclared
-    /data/data/com.termux/files/usr/include/sys/cdefs.h:365: #error Unversioned target triples
-    /data/data/com.termux/files/usr/include/string.h:44: error: expected '=' before 'memccpy'
+1. The rootfs path. proot-distro 5.x keeps it at containers/<name>/rootfs; 4.x used
+   installed-rootfs/<name>. Only the old path was checked, so the script reported
+   "binary missing at ..." for a binary that existed. Both layouts are now tried, and
+   PROOT_BASE can be overridden if a later release moves it again.
 
-None of those files has anything to do with sqlite. The generated flags.make said why:
+2. The binary cannot be executed directly. Its interpreter is /lib/ld-linux-aarch64.so.1 -
+   Debian's glibc loader. Android has /system/bin/linker64 instead, so a direct run gives
+   "cannot execute: required file not found", which reads like a missing file rather than the
+   wrong loader. It must go through `proot-distro login`, which supplies the chroot's loader and
+   libraries. The pid recorded is proot's, since that is what stays alive.
 
-    C_INCLUDES = -I/opt/telegram-bot-api/td/sqlite -isystem /data/data/com.termux/files/usr/include
+`--dir` is validated with realpath and the server refuses to start if it does not exist, so the
+directory is created first, from Termux - which also makes it owned by the user the chroot runs
+as. Its chroot path (/root/telegram-bot-api) is what gets passed, not the Termux path, because
+/data/data/com.termux/... does not exist inside the container.
 
-Using Debian's gcc with Termux's bionic headers cannot work. The path arrived through
-pkg-config: TDLib's CMake asks it for the OpenSSL location, Termux's PKG_CONFIG_PATH was
-inherited into the chroot, and pkg-config answered with the host's copy. CMakeCache.txt recorded
-it in a dozen places:
+cmd_stop now also kills any telegram-bot-api that outlives proot. A survivor keeps the port
+bound, and the next start then reports "port 8081 is already in use by something else" - which
+points at a mystery process rather than at this script's own previous run.
 
-    OPENSSL_INCLUDE_DIR:PATH        = /data/data/com.termux/files/usr/include
-    OPENSSL_CRYPTO_LIBRARY:FILEPATH = /data/data/com.termux/files/usr/lib/libcrypto.so
-    _OPENSSL_CFLAGS:INTERNAL        = -I/data/data/com.termux/files/usr/include
-    _OPENSSL_PREFIX:INTERNAL        = /data/data/com.termux/files/usr
-
-Four changes, because either half alone is not enough:
-
-  - PKG_CONFIG_PATH, PKG_CONFIG_LIBDIR, CPATH, C_INCLUDE_PATH, CPLUS_INCLUDE_PATH,
-    LIBRARY_PATH, LD_LIBRARY_PATH, LD_PRELOAD, CMAKE_*_PATH, CFLAGS and friends are unset
-  - PATH is set to the chroot's own directories only, since /usr/bin/cc exists in Termux too
-  - CC and CXX are pinned to /usr/bin/gcc and /usr/bin/g++, passed to cmake explicitly
-  - `rm -rf build` before configuring: CMake caches its detection, so a stale cache reproduces
-    the failure even after the environment is fixed
-
-Two guards were added. pkg-config's answer for openssl is printed and rejected if it is under
-/data/data/com.termux, and after configuring the build files are grepped for a Termux include
-path, so this class of failure is caught in seconds instead of twenty minutes into a compile.
+The loopback is shared: measured from the Termux app, a listener started inside the chroot on
+0.0.0.0:8099 accepted a connection from Termux, so the bot can reach 127.0.0.1:8081 from
+outside. Note the measurement has to be made FROM THE TERMUX APP - a process started with
+`su 10209` is in the SELinux domain u:r:magisk:s0, where socket creation fails with
+PermissionError and the network looks broken when it is not. Three rounds of this investigation
+went the wrong way for exactly that reason.
