@@ -453,3 +453,32 @@ reachable either way - the app is a convenience, not a replacement.
     bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh          # everything, in order
     bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --status  # report only
     bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --restart # stop, then start
+
+
+## Download the APKs
+
+Everything needed is attached to the [v1.0 release](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.0):
+
+| file | size | what it is |
+| --- | --- | --- |
+| `bot-panel.apk` | 45 KB | the control app, built from `app/` |
+| `termux.apk` | 108.6 MB | Termux itself (0.118.3, the F-Droid build) |
+| `termux-api.apk` | 3.8 MB | Termux:API - provides `termux-wake-lock` |
+| `termux-boot.apk` | 25 KB | Termux:Boot - starts the services at boot |
+
+    adb install -r bot-panel.apk
+    adb install -r termux.apk
+    adb install -r termux-api.apk
+    adb install -r termux-boot.apk
+
+**Termux itself is 108.6 MB**, which is over GitHub's 100 MB per-file limit for a repository file,
+so it lives in the release rather than in `apk/`. The three smaller ones are in both places; see
+[apk/README.md](apk/README.md).
+
+Two things an installer cannot do, both required before the app can start anything:
+
+    adb shell pm grant com.yunai.botpanel com.termux.permission.RUN_COMMAND
+
+and, once, from inside Termux:
+
+    bash ~/twitter_pixiv_tg_bot/scripts/enable-external-apps.sh
