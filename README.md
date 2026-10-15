@@ -568,3 +568,23 @@ changed since the last bump - not an error, since rebuilding after a failure is 
 the reminder is the point.
 
 [VERSIONS.md](VERSIONS.md) lists what each version contained and where the number is used.
+
+
+## Publishing a release
+
+**Create a new release. Never rename one, and never delete one.** A release is a published
+artifact - someone may have downloaded it or be running it, and GitHub gives no undo.
+
+[`tools/release.ps1`](tools/release.ps1) makes the right thing one command:
+
+    ./tools/release.ps1 -List        # every release, its assets and download counts
+    ./tools/release.ps1 -Verify      # check nothing is missing and /releases/latest is right
+    ./tools/release.ps1 -Create      # publish the version in VERSION.properties
+
+It contains **no code that renames or deletes a release**, and `-Create` refuses when the version
+already has one. A tool that cannot express the request cannot make the mistake - and that mistake
+was made once here, with a single `PATCH` that looked harmless.
+
+Run `-Verify` after anything that touches releases. See
+[VERSIONS.md](VERSIONS.md#publishing-a-release) for what each check covers and what the API does
+if you go around the script.

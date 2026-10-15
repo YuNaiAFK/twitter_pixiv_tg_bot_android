@@ -45,33 +45,67 @@ v1.3.
 
 ## Publishing a release
 
-**Create a new release. Never rename one.**
+**Create a new release. Never rename one, and never delete one.**
 
-Each release carries the `bot-panel.apk` built at that version, so an older build stays fetchable
-if a newer one misbehaves. The three Termux APKs are identical in every release and are re-uploaded
-only so that each release stands alone.
+A release is a published artifact. Someone may have downloaded it, linked to it, or be running it
+right now. Renaming or deleting one breaks those links, and GitHub gives no undo. The downloads
+and any discussion attached to it are gone.
 
-    git tag -a v1.4 -m "..."
+[`tools/release.ps1`](tools/release.ps1) exists so that the right thing is one command and the
+wrong thing is not expressible:
+
+    ./tools/release.ps1 -List       # every release, its assets and their download counts
+    ./tools/release.ps1 -Verify      # check nothing is missing and /releases/latest is correct
+    ./tools/release.ps1 -Create      # publish the version in VERSION.properties
+    ./tools/release.ps1 -Create -Draft
+
+    # the one destructive operation, needing the tag and the name spelled out:
+    ./tools/release.ps1 -ReplaceAsset bot-panel.apk -OnRelease v1.3
+
+**The script contains no code that renames or deletes a release.** `-Create` refuses when the
+version already has one, and says what to do instead. That is not politeness - a tool that cannot
+express the request cannot make the mistake, and the mistake was made once here with a PATCH that
+looked harmless.
+
+### Why `apk/bot-panel.apk` is committed as well as attached
+
+Every release keeps the `bot-panel.apk` built at that version, so an older build stays fetchable if
+a newer one misbehaves - and so the build survives the release.
+
+That is not hypothetical. When v1.0's release was lost, the tag still pointed at the old commit and
+`apk/bot-panel.apk` was in the tree, so the exact APK could be restored from git history and
+verified by hash after re-uploading:
+
+    recovered from git:  948CF900BD63071D74D67A5E26A3A744A5A364787F99218E98FF34AA02526E07
+    downloaded again:    948CF900BD63071D74D67A5E26A3A744A5A364787F99218E98FF34AA02526E07
+
+A release is not a backup. It is a copy of something that also lives in the repository.
+
+`-Verify` is worth running after anything that touches releases. It checks that every release still
+has its four assets, that none of them is a truncated upload, that each release's tag still exists,
+and that `/releases/latest` resolves to the version in `VERSION.properties`.
+
+### What not to do, and why
+
+| do not | what happens |
+| --- | --- |
+| `PATCH /releases/{id}` with `tag_name` | GitHub accepts it, moves the release, **and removes the old tag's release page.** This is how v1.0 was lost |
+| `DELETE /releases/{id}` | irreversible; assets, download counts and links all go |
+| `DELETE /releases/assets/{id}` without re-uploading | the release is left with a missing file, which `-Verify` will report |
+| release with an existing `tag_name` **and** `target_commitish` | HTTP 422. The docs say `target_commitish` is ignored when the tag exists; the request is actually rejected |
+
+If a release really must be withdrawn, mark it as a **pre-release** instead - it drops out of
+`/releases/latest` and stays downloadable. Deleting is the last resort, not the first.
+
+### Publishing by hand
+
+The script is a convenience; the sequence it performs is:
+
+    git tag -a v1.4 -m "..."           # tag first
     git push origin v1.4
-    # then POST /repos/{owner}/{repo}/releases with tag_name v1.4, and upload the assets
-
-**Renaming a release's tag moves the release and deletes the old tag's release page.** The API
-accepts `tag_name` on a PATCH and does exactly that, silently:
-
-    PATCH /releases/{id}  {"tag_name": "v1.3"}     # v1.0's release page is now gone
-
-That is how the v1.0 release was lost once. The tag itself survived - `refs/tags/v1.0` still
-pointed at the old commit - so the release could be rebuilt, and its app APK recovered from git
-history and verified by hash. It is why the build output is committed under `apk/` as well as
-attached to the release.
-
-Two more things about that API, both learned the hard way:
-
-  - **`target_commitish` returns 422 when the tag already exists.** The documentation says it is
-    ignored; in practice the request is rejected. Omit it once the tag is pushed, and pass it only
-    when the release should create the tag.
-  - **GitHub cannot replace an asset.** Updating one means DELETE, then POST the new file. The
-    download URL keeps working because it is keyed by the release and the asset name.
+    # POST /repos/{owner}/{repo}/releases  {"tag_name": "v1.4", ...}   # no target_commitish
+    # upload each asset to uploads.github.com
+    # PATCH /releases/{id}  {"make_latest": "true"}
 
 **And one about `/releases/latest`, which the README links to.** It resolves by *publication
 time*, not by version number:
