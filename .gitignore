@@ -29,3 +29,6 @@ telegram-bot-api/
 # Local virtualenvs, if one is ever created on a desktop for testing.
 .venv/
 venv/
+
+# Scratch file used to pass a commit message to git -F. Never commit it.
+_msg.txt
