@@ -73,6 +73,17 @@ Two more things about that API, both learned the hard way:
   - **GitHub cannot replace an asset.** Updating one means DELETE, then POST the new file. The
     download URL keeps working because it is keyed by the release and the asset name.
 
+**And one about `/releases/latest`, which the README links to.** It resolves by *publication
+time*, not by version number:
+
+    PATCH /releases/{id}  {"make_latest": "true"}     # say which one is newest
+
+Rebuilding an old release gives it a newer `published_at` than the current one, so it silently
+becomes "latest" and `/releases/latest` starts handing out the old build. That happened here:
+recreating v1.0 to restore it made `latest` point at v1.0, so the README's download link would
+have led anyone to the version from before the one-tap start existed. Set `make_latest` on the real
+newest release after any rebuild, and check `/releases/latest` rather than assuming.
+
 ## Where the number is used
 
 | place | how it gets the number |
