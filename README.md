@@ -202,3 +202,92 @@ Check the proxy before the mirror:
 
 Both must say `http://`. A terminal-only fix is overwritten on the next run; the file is what
 matters.
+
+
+## The self-hosted Bot API server on Android
+
+Raises the upload limit from 50 MB to 2000 MB. The bot is the same either way; this is an
+optional step, and until it is done `TELEGRAM_LOCAL` must stay `0`.
+
+### What it takes
+
+A Debian chroot through `proot-distro`, with `telegram-bot-api` compiled from source. TDLib is
+the bulk of it: about **40 minutes** on an 8-core phone at `-j2`, plus ~1.1 GB for the rootfs
+and build tree. The result is a 45 MB binary at
+`$PREFIX/var/lib/proot-distro/containers/botapi/rootfs/usr/local/bin/telegram-bot-api`.
+
+### The binary cannot be run directly
+
+    $ .../containers/botapi/rootfs/usr/local/bin/telegram-bot-api
+    cannot execute: required file not found
+
+Its interpreter is `/lib/ld-linux-aarch64.so.1`, which is Debian's glibc loader. Android has
+`/system/bin/linker64` instead. The message never mentions the loader, so it reads like a
+missing file. It has to go through:
+
+    proot-distro login botapi -- /usr/local/bin/telegram-bot-api ...
+
+`run-server.sh` does this. It also tries both rootfs layouts, because **proot-distro 5.x moved
+it** from `installed-rootfs/<name>` to `containers/<name>/rootfs` - checking only the old one
+reported "binary missing" for a binary that was there.
+
+`--dir` is validated with `realpath` and the server refuses to start unless the directory
+already exists; it will not create it. `run-server.sh` creates it first, and passes its **chroot**
+path (`/root/telegram-bot-api`), not its Termux path - `/data/data/com.termux/...` does not
+exist inside the container.
+
+### The loopback is shared
+
+Measured from the Termux app: a listener started inside the chroot on `0.0.0.0:8099` accepted a
+connection from Termux, so the bot reaches `127.0.0.1:8081` from outside the container without
+any forwarding.
+
+**Do not test this through `su`.** A process started with `su 10209` is in the SELinux domain
+`u:r:magisk:s0`, where creating a socket fails with `PermissionError` / `socket: Permission
+denied`. Every network test run that way reports a broken network. Three separate investigations
+concluded "the VPN was killed", "the VPN is unreachable from the chroot" and "the chroot is
+network-isolated" for exactly this reason, and all three were wrong. Network checks must run from
+the Termux app.
+
+### Building it
+
+`proot-distro` needs **no root**: it implements chroot and mount with ptrace inside a userspace
+process. `su` is actively harmful here, because it moves the process into a domain that cannot
+read Termux's own directories.
+
+The chroot does not inherit Termux's proxy configuration - it has its own apt - so
+`setup-termux.sh` writes the HTTP proxy form into `apt.conf.d` inside the container and into
+git's system config. The HTTP form is required: **apt rejects SOCKS outright** and reports it as
+`does not have a Release file`, naming a repository that is working fine.
+
+`PKG_CONFIG_PATH` must also be scrubbed. Left set, pkg-config answers with **Termux's** OpenSSL,
+CMake records `-isystem /data/data/com.termux/files/usr/include`, and the build then compiles
+Android/bionic headers with Debian's gcc - which fails inside `sqlite3.c` with errors about
+`memccpy` and `strcasecmp`, files that have nothing to do with sqlite.
+
+### Running it
+
+    bash scripts/run-server.sh start|stop|status|restart|logs
+
+Then in `.env`:
+
+    TELEGRAM_API_BASE=http://127.0.0.1:8081
+    TELEGRAM_LOCAL=1
+    MAX_UPLOAD_MB=2000
+    BOT_PROXY=http://127.0.0.1:10808
+
+`BOT_PROXY` is worth setting even though the shell usually has one: the bot's own HTTP client
+does not read the shell environment, and without it Twitter, Pixiv and e-hentai downloads fail.
+
+### After a reboot
+
+Both services have to come back, **server first**. `scripts/boot-services.sh` does that, waits
+for the VPN, and waits for the server to bind before starting the bot. Install it with the
+Termux:Boot app:
+
+    mkdir -p ~/.termux/boot
+    cp scripts/boot-services.sh ~/.termux/boot/10-bot.sh
+    chmod +x ~/.termux/boot/10-bot.sh
+
+Termux:Boot must be opened once after installation, and **both Termux and the VPN app must be
+exempt from battery optimisation**, or Android kills them.

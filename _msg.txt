@@ -1,30 +1,18 @@
-Start the Bot API server through proot, and find the rootfs where 5.x puts it
+Document the server deployment, and add a boot script for both services
 
-Two independent faults made this script unusable, both reported as the wrong thing.
+Records what the build actually required, all of it found by measurement on a OnePlus 8 Pro:
 
-1. The rootfs path. proot-distro 5.x keeps it at containers/<name>/rootfs; 4.x used
-   installed-rootfs/<name>. Only the old path was checked, so the script reported
-   "binary missing at ..." for a binary that existed. Both layouts are now tried, and
-   PROOT_BASE can be overridden if a later release moves it again.
+  - proot-distro 5.x moved the rootfs to containers/<name>/rootfs, and the binary cannot be run
+    directly because its interpreter is Debian's /lib/ld-linux-aarch64.so.1
+  - `--dir` needs the directory to exist and takes a chroot path, not a Termux one
+  - the loopback IS shared, and every contrary conclusion came from testing via `su 10209`,
+    whose u:r:magisk:s0 domain cannot create sockets
+  - proot needs no root, and `su` breaks the build by changing the domain
+  - the chroot has its own apt and does not inherit Termux's proxy; apt rejects SOCKS and
+    reports it as a missing Release file
+  - PKG_CONFIG_PATH must be scrubbed or pkg-config answers with Termux's OpenSSL and the build
+    compiles bionic headers with Debian's gcc
 
-2. The binary cannot be executed directly. Its interpreter is /lib/ld-linux-aarch64.so.1 -
-   Debian's glibc loader. Android has /system/bin/linker64 instead, so a direct run gives
-   "cannot execute: required file not found", which reads like a missing file rather than the
-   wrong loader. It must go through `proot-distro login`, which supplies the chroot's loader and
-   libraries. The pid recorded is proot's, since that is what stays alive.
-
-`--dir` is validated with realpath and the server refuses to start if it does not exist, so the
-directory is created first, from Termux - which also makes it owned by the user the chroot runs
-as. Its chroot path (/root/telegram-bot-api) is what gets passed, not the Termux path, because
-/data/data/com.termux/... does not exist inside the container.
-
-cmd_stop now also kills any telegram-bot-api that outlives proot. A survivor keeps the port
-bound, and the next start then reports "port 8081 is already in use by something else" - which
-points at a mystery process rather than at this script's own previous run.
-
-The loopback is shared: measured from the Termux app, a listener started inside the chroot on
-0.0.0.0:8099 accepted a connection from Termux, so the bot can reach 127.0.0.1:8081 from
-outside. Note the measurement has to be made FROM THE TERMUX APP - a process started with
-`su 10209` is in the SELinux domain u:r:magisk:s0, where socket creation fails with
-PermissionError and the network looks broken when it is not. Three rounds of this investigation
-went the wrong way for exactly that reason.
+scripts/boot-services.sh starts the server, waits for it to bind, then starts the bot, waiting
+for the VPN first - with TELEGRAM_LOCAL=1 a reboot that starts only the bot comes back degraded
+or broken.
