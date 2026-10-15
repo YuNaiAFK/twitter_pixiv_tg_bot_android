@@ -282,6 +282,61 @@ def _lock_call_uses_the_setting() -> bool:
     return False
 
 
+def _with_fake_layout():
+    """
+    A context manager giving a temporary project root with a bot/ subdirectory.
+
+    Both cookie layouts are created inside it, so one helper can test either.
+    """
+    import contextlib
+    import shutil as _sh
+    import tempfile as _tf
+
+    @contextlib.contextmanager
+    def _manager():
+        work = Path(_tf.mkdtemp(prefix="dsh-layout-"))
+        saved = bot.BASE_DIR
+        try:
+            (work / "bot").mkdir()
+            (work / "cookies").mkdir()
+            (work / "cookies" / "root.txt").write_text("x", encoding="utf-8")
+            (work / "bot" / "cookies").mkdir()
+            (work / "bot" / "cookies" / "inner.txt").write_text("y", encoding="utf-8")
+            bot.BASE_DIR = work / "bot"
+            yield work
+        finally:
+            bot.BASE_DIR = saved
+            _sh.rmtree(work, ignore_errors=True)
+
+    return _manager()
+
+
+def _cookie_path_from_project_root() -> bool:
+    try:
+        with _with_fake_layout() as work:
+            got = bot.resolve_relative_path("cookies/root.txt")
+            return got is not None and got == work / "cookies" / "root.txt"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _cookie_path_from_bot_dir() -> bool:
+    try:
+        with _with_fake_layout() as work:
+            got = bot.resolve_relative_path("cookies/inner.txt")
+            return got is not None and got == work / "bot" / "cookies" / "inner.txt"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _missing_cookie_path_is_none() -> bool:
+    try:
+        with _with_fake_layout():
+            return bot.resolve_relative_path("cookies/absent.txt") is None
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _refused_chat_replies(chat_type: str, chat_id: int, *, blocked: bool = False) -> int:
     """
     How many messages the bot sends to a chat that may not be served.
@@ -2830,6 +2885,23 @@ check("a string lock path does not crash",
       # AttributeError inside _instance_lock_path.
       _string_lock_path_works(),
       "an override passing a string would break the lock")
+
+# --- Cookie paths resolved from the wrong directory, silently ---
+
+# `BASE_DIR` is bot.py's own directory, so a relative setting like `cookies/twitter.txt` became
+# .../twitter_pixiv_tg_bot/bot/cookies/twitter.txt - while the installer and the README put the
+# cookies beside .env at the project root. The bot then logged "Cookie 檔不存在" and continued
+# with X and e-hentai NOT logged in: a bot that looks like it works, with two of its three
+# features quietly disabled.
+check("a cookie path resolves from the project root",
+      _cookie_path_from_project_root(),
+      "the installer puts cookies beside .env, not inside bot/")
+check("a cookie path under bot/ still resolves",
+      _cookie_path_from_bot_dir(),
+      "the other layout must keep working")
+check("a missing cookie path returns None rather than a wrong path",
+      _missing_cookie_path_is_none(),
+      "a wrong path would be reported as a missing file in a confusing place")
 
 check("the work id is read from every pixiv url shape",
       # An earlier version required five or more digits, so a short id silently yielded ""

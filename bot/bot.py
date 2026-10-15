@@ -2531,6 +2531,34 @@ def source_link_options() -> LinkPreviewOptions:
 
 # -------------------- Login credentials --------------------
 
+def resolve_relative_path(raw: str) -> Path | None:
+    """
+    Resolve a path from `.env`, checking the project root before `BASE_DIR`.
+
+    **A relative path like `cookies/twitter.txt` is ambiguous, and the wrong answer is silent.**
+    ``BASE_DIR`` is this file's directory, so a bare relative path became
+    ``..../twitter_pixiv_tg_bot/bot/cookies/twitter.txt`` - but the cookies live beside `.env`
+    at the project root, where the installer puts them and where the README says to look. The
+    bot then reported "Cookie 檔不存在" and carried on with X and e-hentai **not logged in**,
+    which is a working bot with two of its three features quietly disabled.
+
+    Both locations are tried, project root first, so either layout works. Windows has the same
+    structure and is unaffected: its `cookies/` is also at the project root.
+
+    Returns the first that exists, or None so the caller can report the paths it tried.
+    """
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if path.is_absolute():
+        return path if path.exists() else None
+    for base in (BASE_DIR.parent, BASE_DIR):
+        candidate = base / path
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def resolve_cookie_file(platform: str) -> Path | None:
     """
     Return the cookie file to use for `platform`, or None when none is set.
@@ -2546,16 +2574,18 @@ def resolve_cookie_file(platform: str) -> Path | None:
         candidates.append(PIXIV_COOKIES_FILE)
     candidates.append(COOKIES_FILE)
 
+    tried = []
     for raw in candidates:
         if not raw:
             continue
-        path = Path(raw).expanduser()
-        if not path.is_absolute():
-            path = BASE_DIR / path
-        if path.is_file():
+        path = resolve_relative_path(raw)
+        if path is not None:
             return path
-        logger.warning("Cookie 檔案不存在，已略過：%s", path)
+        tried.append(str(BASE_DIR.parent / Path(raw).expanduser())
+                     if not Path(raw).expanduser().is_absolute() else raw)
 
+    if tried:
+        logger.warning("Cookie 檔案不存在，已略過：%s", "、".join(tried))
     return None
 
 
@@ -2579,15 +2609,20 @@ def resolve_ehentai_cookies() -> Path | None:
 
     Kept separate from resolve_cookie_file because e-hentai is discovered by URL
     shape rather than by detect_media_platform, so it needs its own lookup.
+
+    Uses ``resolve_relative_path`` so a relative setting works from either the project root or
+    ``bot/`` - see that function for why the old `BASE_DIR / path` produced a silent
+    "Cookie 檔不存在" and left e-hentai limited to public galleries.
     """
     if not EHENTAI_COOKIES_FILE:
         return None
-    path = Path(EHENTAI_COOKIES_FILE).expanduser()
-    if not path.is_absolute():
-        path = BASE_DIR / path
-    if path.is_file():
+    path = resolve_relative_path(EHENTAI_COOKIES_FILE)
+    if path is not None:
         return path
-    logger.warning("EHENTAI_COOKIES 指定的檔案不存在：%s", path)
+    logger.warning("EHENTAI_COOKIES 指定的檔案不存在：%s",
+                   BASE_DIR.parent / EHENTAI_COOKIES_FILE
+                   if not Path(EHENTAI_COOKIES_FILE).expanduser().is_absolute()
+                   else EHENTAI_COOKIES_FILE)
     return None
 
 

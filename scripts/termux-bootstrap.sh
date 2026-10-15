@@ -66,19 +66,31 @@ done
 
 if [ -n "$OPEN_PORTS" ]; then
     info "listening locally:$OPEN_PORTS"
+    # **Both forms are recorded, and pip needs the HTTP one.**
+    #
+    # pip cannot use a SOCKS proxy without PySocks, and installing PySocks needs pip - so
+    # `http_proxy=socks5://...` makes every pip invocation fail with "Missing dependencies for
+    # SOCKS support". Measured on this phone: v2rayNG's port answers BOTH protocols, so the
+    # same port works as `http://` for pip while apt, curl and git keep the SOCKS form.
     for port in $OPEN_PORTS; do
         for scheme in socks5 http; do
             code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
                    -x "$scheme://127.0.0.1:$port" https://github.com/ 2>/dev/null || echo "000")
             case "$code" in
                 200|301|302)
-                    PROXY_URL="$scheme://127.0.0.1:$port"
-                    ok "using $PROXY_URL (github.com -> HTTP $code)"
-                    break 2 ;;
+                    if [ "$scheme" = "socks5" ]; then
+                        SOCKS_URL="socks5://127.0.0.1:$port"
+                    else
+                        HTTP_URL="http://127.0.0.1:$port"
+                    fi
+                    ok "$scheme://127.0.0.1:$port works (github.com -> HTTP $code)"
+                    ;;
             esac
         done
+        [ -n "$SOCKS_URL" ] && [ -n "$HTTP_URL" ] && break
     done
-    [ -n "$PROXY_URL" ] || warn "a port is open but nothing got through it"
+    PROXY_URL="${SOCKS_URL:-$HTTP_URL}"
+    [ -n "$HTTP_URL" ] || warn "no HTTP form answered; pip will fall back to a direct connection"
 else
     info "no local proxy port is listening"
 fi
@@ -92,9 +104,13 @@ if [ -z "$PROXY_URL" ]; then
 fi
 
 if [ -n "$PROXY_URL" ]; then
+    # apt, curl and git all speak SOCKS, so they get the best form available.
     export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL" all_proxy="$PROXY_URL"
     export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL" ALL_PROXY="$PROXY_URL"
     printf '%s\n' "$PROXY_URL" > "$HOME/.proxy-url"
+    if [ -n "$HTTP_URL" ]; then
+        printf '%s\n' "$HTTP_URL" > "$HOME/.proxy-url-http"
+    fi
     # apt ignores the *_proxy variables for its own transport; only the config file works.
     mkdir -p "$PREFIX/etc/apt/apt.conf.d"
     {
@@ -104,7 +120,7 @@ if [ -n "$PROXY_URL" ]; then
     # git needs its own setting, and only for github.com: a global http.proxy would break the
     # user's other repositories.
     git config --global http.https://github.com/.proxy "$PROXY_URL" 2>/dev/null || true
-    ok "exported, saved to ~/.proxy-url, and given to apt and git"
+    ok "exported, saved, and given to apt and git"
 fi
 
 # -------------------- mirror (only without a proxy) --------------------
@@ -178,9 +194,48 @@ fi
 ok "python $(python --version 2>&1 | awk '{print $2}')"
 
 say "Python packages"
+# **pip gets the HTTP form of the proxy, not the SOCKS one.**
+#
+# pip refuses a `socks5://` proxy unless PySocks is installed, and installing PySocks needs pip
+# - so the SOCKS form makes every pip run fail with "Missing dependencies for SOCKS support",
+# which is what happened on this phone. The HTTP form needs nothing extra. If no HTTP proxy was
+# found, the variables are cleared so pip tries a direct connection rather than failing on a
+# protocol it cannot speak.
+if [ -n "${HTTP_URL:-}" ]; then
+    export http_proxy="$HTTP_URL" https_proxy="$HTTP_URL" all_proxy="$HTTP_URL"
+    export HTTP_PROXY="$HTTP_URL" HTTPS_PROXY="$HTTP_URL" ALL_PROXY="$HTTP_URL"
+    info "pip will use $HTTP_URL (HTTP form - pip cannot speak SOCKS)"
+else
+    unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
+    info "no HTTP proxy; pip will connect directly"
+fi
+
 python -m pip install --upgrade pip </dev/null 2>&1 | tail -n 2
-python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv </dev/null 2>&1 | tail -n 6
-ok "installed"
+if ! python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv </dev/null 2>&1 | tail -n 20; then
+    warn "pip install reported a problem"
+fi
+
+# **Verify by importing, not by checking an exit code.** The previous version piped pip through
+# `tail` and tested the pipeline's status, which is tail's - always 0 - so a total failure was
+# reported as success and only surfaced when the bot would not start.
+if python - <<'PY'
+import importlib, sys
+missing = []
+for name in ("telegram", "httpx", "PIL", "gallery_dl", "dotenv"):
+    try:
+        importlib.import_module(name)
+    except Exception:
+        missing.append(name)
+if missing:
+    print("MISSING: " + ", ".join(missing))
+    sys.exit(1)
+print("all imports OK")
+PY
+then
+    ok "imports verified"
+else
+    die "Python packages are still missing - see the output above"
+fi
 
 # -------------------- project --------------------
 
