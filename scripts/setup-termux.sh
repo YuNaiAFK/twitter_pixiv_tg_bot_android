@@ -87,9 +87,33 @@ for name in ("telegram", "httpx", "PIL", "gallery_dl", "dotenv"):
         print(f"    \033[36m·\033[0m {name} missing ({exc.__class__.__name__})")
 PY
 else
-    run python -m pip install --upgrade pip
-    run python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv
-    ok "installed"
+    # **`pip install --upgrade pip` is deliberately NOT run.** Termux refuses it outright:
+    #
+    #     ERROR: Installing pip is forbidden, this will break the python-pip package (termux).
+    #
+    # Termux manages pip through `pkg`, so upgrading it with pip desynchronises the two. Under
+    # `set -euo pipefail` that refusal aborted the entire script - which is why the server build
+    # never started, and why the message about a forbidden pip upgrade was the last thing seen.
+    # Upgrading pip is not needed to install what follows; `pkg upgrade` is the right way to
+    # move pip on Termux.
+    #
+    # Each package is checked by importing it, so a re-run only fetches what is genuinely
+    # absent, and a single failure does not stop the others.
+    for pkg in telegram httpx PIL gallery_dl dotenv; do
+        if python -c "import $pkg" >/dev/null 2>&1; then
+            skip "$pkg already installed"
+            continue
+        fi
+        case "$pkg" in
+            telegram)   pipname="python-telegram-bot" ;;
+            PIL)        pipname="pillow" ;;
+            gallery_dl) pipname="gallery-dl" ;;
+            dotenv)     pipname="python-dotenv" ;;
+            *)          pipname="$pkg" ;;
+        esac
+        run python -m pip install "$pipname"
+    done
+    ok "python packages present"
 fi
 
 # -------------------- 3. project layout --------------------

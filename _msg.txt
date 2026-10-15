@@ -1,18 +1,15 @@
-Pass the proxy into the Debian chroot, which does not inherit Termux's
+Stop running 'pip install --upgrade pip', which Termux forbids
 
-The server build runs pt-get update and git clone github.com inside a proot Debian rootfs,
-and neither step had a proxy. A chroot has its own apt: Termux's apt.conf.d/95proxy lives inside
-$PREFIX and means nothing to a Debian rootfs. apt also ignores the *_proxy environment
-variables for its own transport, so exporting them in Termux was never going to be enough.
+    $ python -m pip install --upgrade pip
+    ERROR: Installing pip is forbidden, this will break the python-pip package (termux).
 
-Without this the build fails immediately in mainland China, with the same misleading symptom as
-before - "does not have a Release file", naming a repository that is working fine.
+Termux manages pip through pkg, so upgrading it with pip desynchronises the two and Termux
+blocks it. Under set -euo pipefail that refusal aborted the whole script, so the server build
+never reached the chroot at all - the last thing on screen was the forbidden-upgrade error.
 
-The HTTP form is required and is enforced: apt rejects SOCKS outright with "Unsupported proxy
-configured" and reports it as a broken repository. When ~/.proxy-url is not an http:// URL it is
-discarded with a warning, so a failure stays honest instead of looking like a network outage.
+Two changes in setup-termux.sh:
 
-The value travels in Termux's own $PREFIX/tmp, because --shared-tmp is what binds that
-directory to /tmp inside the chroot - writing to ~/ or to / would leave the chroot without it.
-Inside the chroot the script writes /etc/apt/apt.conf.d/95proxy and sets git's proxy with
---system, since there is no matching user in the rootfs.
+  - the upgrade is removed; it is not needed to install the packages below, and pkg upgrade is
+    the right way to move pip on Termux
+  - the single bulk pip install becomes a per-package loop that checks by importing first, so a
+    re-run only fetches what is genuinely absent and one failure does not skip the rest
