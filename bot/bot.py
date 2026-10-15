@@ -7862,6 +7862,56 @@ def telegram_server_root() -> str:
     return TELEGRAM_API_BASE.rstrip("/")
 
 
+def telegram_base_is_local() -> bool:
+    """
+    Whether the Bot API endpoint is on this machine.
+
+    Needed because the self-hosted server listens on 127.0.0.1:8081 and **must not be reached
+    through the VPN**. python-telegram-bot's ``HTTPXRequest`` defaults to ``trust_env=True``,
+    which makes httpx read ``HTTP_PROXY``/``HTTPS_PROXY``/``ALL_PROXY`` from the environment -
+    and on a phone those are set in ``~/.bashrc`` so that gallery-dl can reach Twitter, Pixiv and
+    e-hentai.
+
+    Measured consequence: every Bot API call was being tunnelled out to the VPN and back to the
+    local port. ``/proc/net/tcp`` showed the socket to 127.0.0.1:8081 owned by the VPN's uid
+    rather than the bot's. It works, but it is pointless latency on every message, it doubles the
+    traffic, and it breaks outright on a VPN configured with a bypass for local addresses.
+
+    Only a loopback host counts. A remote self-hosted server is a normal case and should keep
+    whatever proxy the environment provides.
+    """
+    root = telegram_server_root()
+    if not root:
+        return False
+    try:
+        host = urlsplit(root).hostname or ""
+    except ValueError:
+        return False
+    return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
+
+
+def bypass_proxy_for_loopback() -> None:
+    """
+    Add loopback to NO_PROXY so no child process tunnels local traffic.
+
+    httpx honours NO_PROXY, and so do requests and aiohttp - which is what gallery-dl uses. Doing
+    it in the environment as well as in the PTB request means one rule covers the bot's own HTTP
+    client, the Telegram calls, and every subprocess.
+
+    Existing entries are preserved: a user who set NO_PROXY deserves to keep it.
+    """
+    if not telegram_base_is_local():
+        return
+    wanted = ["127.0.0.1", "localhost", "::1"]
+    for name in ("NO_PROXY", "no_proxy"):
+        current = os.getenv(name) or ""
+        entries = [e.strip() for e in current.split(",") if e.strip()]
+        for host in wanted:
+            if host not in entries:
+                entries.append(host)
+        os.environ[name] = ",".join(entries)
+
+
 def telegram_base_url() -> str:
     """
     The value ``base_url()`` needs: the server root **plus ``/bot``**.
@@ -8054,6 +8104,19 @@ def build_application() -> Application:
         pool_timeout=30.0,
         media_write_timeout=request_timeout,
     )
+    # **With a local server, never let the environment proxy the Bot API calls.**
+    #
+    # HTTPXRequest defaults to trust_env=True, so httpx picks up HTTP_PROXY/HTTPS_PROXY/ALL_PROXY.
+    # On a phone those are set for gallery-dl's sake, which meant every getUpdates and every file
+    # upload was tunnelled out to the VPN and back to 127.0.0.1:8081 - measured by the socket to
+    # that port being owned by the VPN's uid instead of the bot's. It works, but it wastes a round
+    # trip through the tunnel on every message and breaks on a VPN that bypasses local addresses.
+    #
+    # Only when the base URL is loopback: a *remote* self-hosted server is a normal case and must
+    # keep using the proxy.
+    if telegram_base_is_local():
+        request_kwargs["trust_env"] = False
+        logger.info("Bot API 位於本機，已停用其代理（不經 VPN 繞道）")
     builder = builder.get_updates_request(
         HTTPXRequest(**request_kwargs)
     ).request(
@@ -8093,6 +8156,11 @@ def main():
 
     if not BOT_TOKEN:
         raise SystemExit("缺少 BOT_TOKEN，請複製 .env.example 為 .env 並填寫 Token。")
+
+    # Set NO_PROXY before anything can make a request or spawn a subprocess. With a self-hosted
+    # server this keeps localhost traffic off the VPN in the bot's own client, in PTB, and in
+    # gallery-dl - see bypass_proxy_for_loopback for what was measured.
+    bypass_proxy_for_loopback()
 
     # A replacement process waits for the previous instance to release the single-instance
     # lock, instead of sleeping for a fixed period.

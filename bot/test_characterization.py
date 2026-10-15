@@ -379,6 +379,64 @@ def _expiry_still_reported_without_stop() -> bool:
         return False
 
 
+def _base_is_local(base: str) -> bool:
+    """Reload bot with TELEGRAM_API_BASE set, then ask it whether the base is loopback."""
+    import importlib
+    saved = {k: os.environ.get(k) for k in ("TELEGRAM_API_BASE",)}
+    try:
+        os.environ["TELEGRAM_API_BASE"] = base
+        importlib.reload(bot)
+        return bot.telegram_base_is_local()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        importlib.reload(bot)
+
+
+def _local_base_detected() -> bool:
+    try:
+        return (_base_is_local("http://127.0.0.1:8081")
+                and _base_is_local("http://localhost:8081"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _remote_base_not_local() -> bool:
+    try:
+        # No base at all means the public API, which is remote by definition.
+        return not _base_is_local("https://bot.example.com") and not _base_is_local("")
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _no_proxy_preserves_existing() -> bool:
+    import importlib
+    # **Do not pop "no_proxy" here.** On Windows os.environ is case-insensitive, so removing the
+    # lowercase name also removes the uppercase one that was just set - which made this check fail
+    # against correct code. Only TELEGRAM_API_BASE and NO_PROXY are touched, and NO_PROXY is set
+    # to a known value rather than cleared, so the assertion tests what it claims to.
+    saved = {k: os.environ.get(k) for k in ("TELEGRAM_API_BASE", "NO_PROXY")}
+    try:
+        os.environ["TELEGRAM_API_BASE"] = "http://127.0.0.1:8081"
+        os.environ["NO_PROXY"] = "example.com"
+        importlib.reload(bot)
+        bot.bypass_proxy_for_loopback()
+        value = os.environ.get("NO_PROXY", "")
+        return "example.com" in value and "127.0.0.1" in value and "localhost" in value
+    except Exception:  # noqa: BLE001
+        return False
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+        importlib.reload(bot)
+
+
 def _refused_chat_replies(chat_type: str, chat_id: int, *, blocked: bool = False) -> int:
     """
     How many messages the bot sends to a chat that may not be served.
@@ -3659,6 +3717,22 @@ check("each parallel worker uses its own client",
       "a shared client would serialise on its connection pool")
 
 # (j) The Bot API server limits must be probed, not assumed.
+# (k) A local Bot API server must not be reached through the VPN.
+#
+# python-telegram-bot's HTTPXRequest defaults to trust_env=True, so httpx reads HTTP_PROXY and
+# friends. On a phone those are set so gallery-dl can reach Twitter and Pixiv - which meant every
+# getUpdates and every upload was tunnelled out to the VPN and back to 127.0.0.1:8081. The socket
+# to that port showed up owned by the VPN's uid rather than the bot's.
+check("a loopback Bot API base is recognised as local",
+      _local_base_detected(),
+      "only a loopback host should skip the proxy; a remote server still needs it")
+check("a remote Bot API base is NOT treated as local",
+      _remote_base_not_local(),
+      "disabling the proxy for a remote server would break it behind a firewall")
+check("NO_PROXY gains loopback without losing what was there",
+      _no_proxy_preserves_existing(),
+      "overwriting a user's NO_PROXY would break unrelated hosts they exempted")
+
 check("the upload ceiling is probed rather than assumed",
       "probe_telegram_limits" in _SOURCE)
 check("path uploads are only claimed with --local",
