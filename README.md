@@ -395,3 +395,61 @@ initialised. `this::pollOnce` avoids both problems.
 key generation aborted the build. `keytool` and `apksigner` are therefore invoked through
 `cmd /c`, and by full path - going through `cmd` does not inherit PowerShell's PATH additions, so
 a bare `apksigner` was "not recognized".
+
+
+## The commands you have to run by hand: none
+
+The app can start everything itself, so there is normally nothing to type in Termux.
+
+Pressing **一鍵啟動服務** sends a `com.termux.RUN_COMMAND` intent, which makes Termux run
+`scripts/start-all.sh` - the same script the boot script uses. The app then polls until the panel
+answers and the card disappears on its own, so it also detects a command you ran by hand.
+
+### The two things that must be in place
+
+Both are set up once and survive; the app reports whichever is missing rather than appearing to do
+nothing.
+
+**1. Termux must allow external apps.** Without it the intent is refused:
+
+    bash scripts/enable-external-apps.sh
+
+**Termux must then be restarted** - it reads `~/.termux/termux.properties` once at startup. The
+script says so when it finishes.
+
+**2. The app must hold `com.termux.permission.RUN_COMMAND`.** It requests it at runtime; a fresh
+install resets the grant, and adb can restore it without a dialog:
+
+    adb shell pm grant com.yunai.botpanel com.termux.permission.RUN_COMMAND
+
+### The trap that made this look like a permission problem
+
+`startService` returned `null` and nothing happened, with the permission granted and the service
+declared `exported=true`:
+
+    W/ActivityManager: Unable to start service Intent { act=com.termux.RUN_COMMAND
+      cmp=com.termux/.app.RunCommandService } U=0: not found
+    startService returned null
+
+"not found" for a service that exists. **Android 11 (API 30) package visibility**: an app sees only
+its own packages unless it asks for more, so the service was invisible. The identical intent worked
+from a root shell, because root is exempt from the filter - which is what sent the investigation
+after permissions for several rounds.
+
+The fix is three lines in the manifest:
+
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
+`<queries>` rather than `QUERY_ALL_PACKAGES`: this app wants exactly one package and says so.
+Visibility and permission are separate mechanisms, and only one of them was the problem.
+
+### If it still does not work
+
+Every card has a **顯示手動指令** button, which shows the commands to type. The same scripts are
+reachable either way - the app is a convenience, not a replacement.
+
+    bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh          # everything, in order
+    bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --status  # report only
+    bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --restart # stop, then start

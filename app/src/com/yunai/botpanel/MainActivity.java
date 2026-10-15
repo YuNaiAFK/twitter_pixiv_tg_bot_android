@@ -1,6 +1,7 @@
 package com.yunai.botpanel;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.app.AlertDialog;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -57,6 +58,33 @@ import java.util.concurrent.Executors;
 public class MainActivity extends Activity {
 
     private static final String DEFAULT_BASE = "http://127.0.0.1:8090";
+    private static final String TAG = "BotPanel";
+
+    /**
+     * Termux's package and the command service it exposes for other apps.
+     *
+     * The service is declared with `permission com.termux.permission.RUN_COMMAND`, which this
+     * app requests, and Termux additionally requires `allow-external-apps=true` in its own
+     * properties before it will act on the intent. Both are checked; see startServices().
+     */
+    private static final String TERMUX_PACKAGE = "com.termux";
+    private static final String TERMUX_SERVICE = "com.termux.app.RunCommandService";
+    private static final String ACTION_RUN_COMMAND = "com.termux.RUN_COMMAND";
+    private static final String PERMISSION_RUN_COMMAND = "com.termux.permission.RUN_COMMAND";
+
+    /** Where the project lives inside Termux. Matches what the installer creates. */
+    private static final String TERMUX_HOME = "/data/data/com.termux/files/home";
+    private static final String TERMUX_BIN = "/data/data/com.termux/files/usr/bin";
+    private static final String PROJECT_DIR = TERMUX_HOME + "/twitter_pixiv_tg_bot";
+
+    /** Request codes for the two runtime permissions. */
+    private static final int REQ_RUN_COMMAND = 1001;
+
+    /** What the card's button does next. */
+    private static final int ACTION_NONE = 0;
+    private static final int ACTION_START = 1;
+    private static final int ACTION_TOGGLE_HELP = 2;
+    private static final int ACTION_RETRY = 3;
     /** How often the status and the log refresh while the screen is in front. */
     private static final int POLL_MS = 4000;
 
@@ -69,9 +97,13 @@ public class MainActivity extends Activity {
     private TextView srvValue, srvDetail;
     private TextView pxyValue, pxyDetail;
     private TextView diskValue, diskDetail;
-    private TextView logView, logMeta, bannerText;
+    private TextView logView, logMeta, bannerText, bannerTitle, bannerDetail;
     private View banner;
-    private Button liveButton;
+    private Button liveButton, bannerButton;
+    /** What the banner's button should do next; see onBannerButton(). */
+    private int bannerAction = ACTION_NONE;
+    /** True while the app is waiting for the services it just asked Termux to start. */
+    private volatile boolean waitingForStart = false;
 
     private boolean live = true;
     private long lastLogSize = -1;
@@ -222,20 +254,72 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.parseColor("#0f1115"));
         root.setPadding(dp(12), dp(14), dp(12), dp(14));
 
-        // A banner that says why the app cannot act, rather than leaving the buttons looking
-        // broken. Hidden while the panel answers.
+        // The "start everything" card.
+        //
+        // It exists because of a circular dependency: this app talks to the control panel, and
+        // the panel is a Termux process that someone has to start. Without this, the app is
+        // useless until the user opens a terminal and types a command - which is the whole thing
+        // it is meant to avoid.
+        //
+        // The button sends com.termux.RUN_COMMAND, asking Termux to run scripts/start-all.sh.
+        // Two things must be true, and the card checks and reports both rather than failing
+        // silently:
+        //
+        //   1. this app holds com.termux.permission.RUN_COMMAND (requested at runtime)
+        //   2. Termux's properties say `allow-external-apps=true`, and Termux has been restarted
+        //      since - written by scripts/enable-external-apps.sh
+        //
+        // If either is missing the intent is dropped with no error at all. A button that
+        // appeared to do nothing would be the worst possible outcome, so the manual command is
+        // always one tap away rather than hidden behind a failure.
         banner = new LinearLayout(this);
         ((LinearLayout) banner).setOrientation(LinearLayout.VERTICAL);
-        ((LinearLayout) banner).setPadding(dp(12), dp(10), dp(12), dp(10));
+        ((LinearLayout) banner).setPadding(dp(13), dp(12), dp(13), dp(12));
         android.graphics.drawable.GradientDrawable bannerBg = new android.graphics.drawable.GradientDrawable();
         bannerBg.setColor(Color.parseColor("#3a2a12"));
         bannerBg.setCornerRadius(dp(10));
         bannerBg.setStroke(dp(1), Color.parseColor("#7a5a1f"));
         banner.setBackground(bannerBg);
+
+        bannerTitle = new TextView(this);
+        bannerTitle.setTextSize(15f);
+        bannerTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        bannerTitle.setTextColor(Color.parseColor("#ffd479"));
+        ((LinearLayout) banner).addView(bannerTitle);
+
         bannerText = new TextView(this);
         bannerText.setTextSize(12.5f);
-        bannerText.setTextColor(Color.parseColor("#ffd479"));
+        bannerText.setTextColor(Color.parseColor("#e8d9b0"));
+        bannerText.setPadding(0, dp(4), 0, 0);
         ((LinearLayout) banner).addView(bannerText);
+
+        bannerButton = new Button(this);
+        bannerButton.setTextSize(14f);
+        bannerButton.setAllCaps(false);
+        bannerButton.setTypeface(Typeface.DEFAULT_BOLD);
+        android.graphics.drawable.GradientDrawable btnBg = new android.graphics.drawable.GradientDrawable();
+        btnBg.setColor(Color.parseColor("#8a5a12"));
+        btnBg.setCornerRadius(dp(10));
+        btnBg.setStroke(dp(1), Color.parseColor("#c08a30"));
+        bannerButton.setBackground(btnBg);
+        bannerButton.setTextColor(Color.parseColor("#fff4dd"));
+        bannerButton.setPadding(0, dp(13), 0, dp(13));
+        LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btnParams.setMargins(0, dp(10), 0, 0);
+        bannerButton.setLayoutParams(btnParams);
+        bannerButton.setOnClickListener(v -> onBannerButton());
+        ((LinearLayout) banner).addView(bannerButton);
+
+        bannerDetail = new TextView(this);
+        bannerDetail.setTextSize(11f);
+        bannerDetail.setTypeface(Typeface.MONOSPACE);
+        bannerDetail.setTextColor(Color.parseColor("#cbb98d"));
+        bannerDetail.setPadding(0, dp(9), 0, 0);
+        bannerDetail.setTextIsSelectable(true);
+        bannerDetail.setVisibility(View.GONE);
+        ((LinearLayout) banner).addView(bannerDetail);
+
         banner.setVisibility(View.GONE);
         root.addView(banner);
 
@@ -342,8 +426,10 @@ public class MainActivity extends Activity {
         note.setTextSize(11.5f);
         note.setTextColor(Color.parseColor("#8b93a7"));
         note.setPadding(dp(3), dp(16), dp(3), 0);
-        note.setText("按鈕執行的是 Termux 裡既有的 run-bot.sh 與 run-server.sh。\n"
-                + "這個 app 需要控制面板在執行中：Termux 裡執行 bash control/run-panel.sh start");
+        note.setText("這個 app 直接呼叫 Termux 裡既有的腳本：\n"
+                + "scripts/start-all.sh、run-bot.sh、run-server.sh。\n\n"
+                + "服務沒在跑的時候，上面會出現「一鍵啟動服務」，按下去就好，不需要打開 Termux。\n\n"
+                + "按鈕行為與命令列完全一致，所以任何一個都能用指令達成。");
         root.addView(note);
 
         ScrollView page = new ScrollView(this);
@@ -421,14 +507,180 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showBanner(String text) {
+    /**
+     * Show the card that explains why the app cannot act, and offer the way out.
+     *
+     * @param title   one line, large
+     * @param text    what is wrong, and what will happen if the button is pressed
+     * @param action  what the button does; see onBannerButton()
+     * @param label   the button's text
+     * @param help    monospace text revealed by the second button - the commands to type by hand,
+     *                which is the fallback when Termux is not accepting intents
+     */
+    private void showCard(String title, String text, int action, String label, String help) {
+        bannerTitle.setText(title);
         bannerText.setText(text);
+        bannerAction = action;
+        bannerButton.setText(label);
+        if (help == null || help.isEmpty()) {
+            bannerDetail.setVisibility(View.GONE);
+            bannerDetail.setText("");
+        } else {
+            // Kept in the view even while hidden: the toggle only flips visibility, so the text
+            // is there the moment it is wanted and cannot be lost by a failed refresh.
+            bannerDetail.setText(help);
+        }
         banner.setVisibility(View.VISIBLE);
     }
 
     private void hideBanner() {
         banner.setVisibility(View.GONE);
+        bannerDetail.setVisibility(View.GONE);
     }
+
+    /** The commands a person would type, for when the automatic path is unavailable. */
+    private String manualCommands() {
+        return "在 Termux 貼上：\n\n"
+                + "bash " + PROJECT_DIR + "/scripts/start-all.sh\n\n"
+                + "如果上面那個按鈕按了沒反應，還要先允許外部 app：\n\n"
+                + "bash " + PROJECT_DIR + "/scripts/enable-external-apps.sh\n\n"
+                + "（執行後要完全關閉 Termux 再重開，它只在啟動時讀設定）";
+    }
+
+    private boolean hasRunCommandPermission() {
+        // A custom permission from another package; checkSelfPermission handles those the same
+        // way as a platform one.
+        return checkSelfPermission(PERMISSION_RUN_COMMAND)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void onBannerButton() {
+        switch (bannerAction) {
+            case ACTION_START:
+                startServices();
+                break;
+            case ACTION_RETRY:
+                // A single status poll, so the button feels immediate rather than waiting up to
+                // POLL_MS for the loop to come round.
+                bannerText.setText("檢查中…");
+                refreshStatus();
+                break;
+            case ACTION_TOGGLE_HELP:
+                if (bannerDetail.getVisibility() == View.VISIBLE) {
+                    bannerDetail.setVisibility(View.GONE);
+                    bannerButton.setText("顯示手動指令");
+                } else {
+                    bannerDetail.setVisibility(View.VISIBLE);
+                    bannerButton.setText("隱藏手動指令");
+                }
+                break;
+            default:
+                refreshStatus();
+        }
+    }
+
+    /**
+     * Ask Termux to run start-all.sh.
+     *
+     * The permission is requested first if it is missing, because the intent would otherwise be
+     * dropped without an error of any kind - `startService` on a permission-protected service in
+     * another package fails silently from the caller's point of view, and the user would see a
+     * button that does nothing.
+     */
+    private void startServices() {
+        android.util.Log.i(TAG, "startServices: permission granted=" + hasRunCommandPermission());
+        if (!hasRunCommandPermission()) {
+            ui.post(() -> showCard("需要一個權限",
+                    "要讓 app 自己啟動服務，需要 Termux 的「執行指令」權限。\n"
+                            + "按下面的按鈕授權，然後再按一次啟動。",
+                    ACTION_RETRY, "授權後重新檢查", manualCommands()));
+            requestPermissions(new String[]{PERMISSION_RUN_COMMAND}, REQ_RUN_COMMAND);
+            return;
+        }
+
+        Intent intent = new Intent();
+        intent.setClassName(TERMUX_PACKAGE, TERMUX_SERVICE);
+        intent.setAction(ACTION_RUN_COMMAND);
+        intent.putExtra("com.termux.RUN_COMMAND_PATH", TERMUX_BIN + "/bash");
+        intent.putExtra("com.termux.RUN_COMMAND_ARGUMENTS",
+                new String[]{PROJECT_DIR + "/scripts/start-all.sh"});
+        intent.putExtra("com.termux.RUN_COMMAND_WORKDIR", PROJECT_DIR);
+        // Background, so nothing opens on screen: the point is to start services, not to steal
+        // focus with a terminal the user did not ask for.
+        intent.putExtra("com.termux.RUN_COMMAND_BACKGROUND", true);
+        intent.putExtra("com.termux.RUN_COMMAND_SESSION_ACTION", 0);
+
+        try {
+            // **The return value matters.** `startService` returns null when the service was not
+            // found or the system declined to start it, and a ComponentName when the request was
+            // accepted. It does not throw for either case, so ignoring it - as the first version
+            // did - makes "silently did nothing" indistinguishable from "Termux is starting up".
+            // The component name is also logged in full so a wrong package or class shows up.
+            android.util.Log.i(TAG, "sending RUN_COMMAND to " + TERMUX_PACKAGE + "/" + TERMUX_SERVICE
+                    + " args=" + java.util.Arrays.toString(
+                            intent.getStringArrayExtra("com.termux.RUN_COMMAND_ARGUMENTS")));
+            android.content.ComponentName started = startService(intent);
+            android.util.Log.i(TAG, "startService returned " + started);
+            if (started == null) {
+                showCard("Termux 沒有接受指令",
+                        "Android 沒有啟動 Termux 的指令服務。\n\n"
+                                + "通常是 Termux 不在執行中，或它的指令服務被系統擋下。"
+                                + "請先開啟一次 Termux，再回來按這個按鈕；如果還是不行，用下面的指令。",
+                        ACTION_TOGGLE_HELP, "顯示手動指令", manualCommands());
+                bannerDetail.setVisibility(View.VISIBLE);
+                bannerButton.setText("隱藏手動指令");
+                return;
+            }
+        } catch (Exception exc) {
+            // The usual cause is `allow-external-apps` being off, which makes Termux refuse the
+            // intent; Android 8+ also refuses startService from the background. Either way the
+            // user needs the manual command, not an exception.
+            showCard("無法自動啟動",
+                    "Termux 拒絕了指令（" + describe(exc) + "）。\n\n"
+                            + "最可能的原因是 Termux 還沒允許外部 app 執行指令。請照下面的步驟做一次，"
+                            + "之後就可以用按鈕了。",
+                    ACTION_TOGGLE_HELP, "顯示手動指令", manualCommands());
+            bannerDetail.setVisibility(View.VISIBLE);
+            bannerButton.setText("隱藏手動指令");
+            return;
+        }
+
+        waitingForStart = true;
+        showCard("正在啟動服務…",
+                "已請 Termux 啟動伺服器、機器人與控制面板。\n"
+                        + "順序是伺服器 → 機器人 → 面板，需要幾秒到一分鐘。",
+                ACTION_TOGGLE_HELP, "顯示手動指令", manualCommands());
+        // Poll harder than the normal interval while waiting, so the card clears as soon as the
+        // panel answers rather than up to POLL_MS later.
+        ui.postDelayed(this::pollWhileStarting, 2000);
+    }
+
+    /**
+     * Watch for the services to come up, and give up with an explanation if they do not.
+     *
+     * The timeout is ~90 s: start-all.sh waits up to 40 s for the server (proot has to build its
+     * whole mount table) plus 20 s for the panel.
+     */
+    private void pollWhileStarting() {
+        if (destroyed || !waitingForStart) return;
+        refreshStatus();
+        startWaitTicks++;
+        if (startWaitTicks > 45) {
+            startWaitTicks = 0;
+            waitingForStart = false;
+            showCard("服務沒有回應",
+                    "已經等了約 90 秒，控制面板還是沒有回應。\n\n"
+                            + "常見原因：Termux 沒有允許外部 app 執行指令，或 Termux 本身被 Android 關掉了。"
+                            + "請照下面的步驟手動執行一次。",
+                    ACTION_TOGGLE_HELP, "顯示手動指令", manualCommands());
+            bannerDetail.setVisibility(View.VISIBLE);
+            bannerButton.setText("隱藏手動指令");
+            return;
+        }
+        ui.postDelayed(this::pollWhileStarting, 2000);
+    }
+
+    private int startWaitTicks = 0;
 
     private void refreshStatus() {
         pool.execute(() -> {
@@ -455,6 +707,10 @@ public class MainActivity extends Activity {
 
                 ui.post(() -> {
                     if (destroyed) return;
+                    // A successful poll is the detection: whatever the user did - pressed the
+                    // button, or ran the command by hand - the card goes away on its own.
+                    waitingForStart = false;
+                    startWaitTicks = 0;
                     hideBanner();
 
                     botValue.setText(botUp ? "執行中" : "已停止");
@@ -493,10 +749,15 @@ public class MainActivity extends Activity {
                     srvValue.setText("—");
                     pxyValue.setText("—");
                     diskValue.setText("—");
-                    // The single most likely reason, named outright, because "connection refused"
-                    // does not tell anyone that the panel has to be started first.
-                    showBanner("控制面板沒有回應（" + base + "）。\n"
-                            + "在 Termux 執行：bash control/run-panel.sh start");
+                    // The panel is the only way this app can act, so an unreachable one is the
+                    // single failure worth a full card rather than a red dot.
+                    if (!waitingForStart) {
+                        showCard("服務尚未啟動",
+                                "這個 app 透過 Termux 裡的控制面板運作，而面板現在沒有回應（"
+                                        + base + "）。\n\n按下面的按鈕讓 app 直接啟動它，"
+                                        + "不需要打開 Termux。",
+                                ACTION_START, "一鍵啟動服務", manualCommands());
+                    }
                 });
             }
         });
@@ -607,6 +868,25 @@ public class MainActivity extends Activity {
             if (!line.isEmpty()) out.append(line).append('\n');
         }
         return out.toString().trim();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_RUN_COMMAND) return;
+        boolean granted = results.length > 0
+                && results[0] == android.content.pm.PackageManager.PERMISSION_GRANTED;
+        if (granted) {
+            startServices();
+        } else {
+            showCard("權限被拒絕",
+                    "沒有這個權限，app 就無法請 Termux 啟動服務。\n\n"
+                            + "可以到「設定 → 應用程式 → Bot 控制台 → 權限」手動開啟，"
+                            + "或直接用下面的指令。",
+                    ACTION_TOGGLE_HELP, "顯示手動指令", manualCommands());
+            bannerDetail.setVisibility(View.VISIBLE);
+            bannerButton.setText("隱藏手動指令");
+        }
     }
 
     private void openInBrowser() {

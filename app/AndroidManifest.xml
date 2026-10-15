@@ -20,6 +20,45 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!--
+      Lets this app ask Termux to run a command, which is how the services get started without
+      anyone opening a terminal.
+
+      Two things must both be true for it to work, and the app reports which is missing rather
+      than failing quietly:
+
+        1. this permission must be granted (it is "dangerous", so it is requested at runtime)
+        2. Termux's own properties must say `allow-external-apps=true`
+           - written by scripts/enable-external-apps.sh, and Termux must be restarted after
+
+      Without both, the intent is dropped with no error - which is exactly the kind of silent
+      failure the app's fallback text exists to explain.
+    -->
+    <uses-permission android:name="com.termux.permission.RUN_COMMAND" />
+
+    <!--
+      **Required on Android 11+ or the intent cannot be delivered at all.**
+
+      API 30 introduced package visibility: an app sees only its own packages and a small set of
+      others unless it asks for more. Without this, `startService` for Termux's service fails
+      with
+
+          W/ActivityManager: Unable to start service Intent { act=com.termux.RUN_COMMAND
+            cmp=com.termux/.app.RunCommandService } U=0: not found
+          startService returned null
+
+      - "not found" for a service that plainly exists. Holding the RUN_COMMAND permission is not
+      enough; visibility and permission are separate mechanisms, which is what made this look
+      like a permission problem for so long. It is also why the identical intent worked when sent
+      as root: root is exempt from visibility filtering.
+
+      `<queries>` names the package explicitly rather than using QUERY_ALL_PACKAGES, which is for
+      launchers and is restricted on Play. This app wants one package and says so.
+    -->
+    <queries>
+        <package android:name="com.termux" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
