@@ -291,3 +291,53 @@ Termux:Boot app:
 
 Termux:Boot must be opened once after installation, and **both Termux and the VPN app must be
 exempt from battery optimisation**, or Android kills them.
+
+
+## Control panel
+
+A local web page for starting, stopping and restarting the bot and the server, watching the log,
+clearing the cache and editing `.env`, so the phone does not need a terminal for routine work.
+
+    bash control/run-panel.sh start      # then open http://127.0.0.1:8090/
+    bash control/run-panel.sh status
+    bash control/run-panel.sh stop
+
+In Chrome, **menu -> Add to Home screen** turns it into an app-like icon: the manifest sets
+`display: standalone`, so it opens full screen with no address bar, and it works offline because
+everything is served from inside the phone.
+
+### It is a thin layer, deliberately
+
+Every button shells out to `run-bot.sh` or `run-server.sh`. The panel does not reimplement
+starting the bot, so it cannot drift out of step with what those scripts do - and whatever the
+panel can do, the command line can still do when the panel is not running.
+
+### Why it binds 127.0.0.1
+
+The panel can read and write `.env`, which holds the bot token, and can start and stop the bot.
+Reachable from the LAN without a password, that is a remote shell. It therefore binds loopback
+and **refuses to listen anywhere else unless `--host` says so**, in which case a token is
+generated and required on every request:
+
+    bash control/run-panel.sh start              # loopback, no token
+    PANEL_HOST=0.0.0.0 bash control/run-panel.sh start   # token printed, must be supplied
+
+### Not part of the boot script
+
+`~/.termux/boot/10-bot.sh` starts the bot and the server only. The panel is wanted when someone
+is there to look at it; leaving an HTTP service running for no reason is a habit worth not
+forming. Start it when needed.
+
+### The guards that matter
+
+  - **`.env` writes are validated and backed up.** A line without `=`, an illegal key name or a
+    null byte is rejected, and the previous file is copied to `data/env-backups/` first (last 20
+    kept). Line endings are forced to LF: a CRLF `.env` gives a value a trailing `\r`, which once
+    made the server build fail with `Can't parse as an integer string "30753020"`.
+  - **Cache clearing stays inside the project.** Each path is resolved and checked to be under
+    the project root before removal, and only the contents of `.cache` are deleted, not the
+    directory.
+  - **The log is tailed, not loaded.** The file grows without bound, so it is read backwards in
+    blocks; reading it in full on every poll would get slower every day.
+  - **The bot's running state is not taken from the pid file alone.** A stale pid file is how the
+    Stop button quietly stops working, so the process list is checked too.

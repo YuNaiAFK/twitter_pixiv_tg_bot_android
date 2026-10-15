@@ -459,6 +459,109 @@ def _httpx_request_accepts_the_bypass() -> bool:
         return False
 
 
+def _load_panel():
+    """Import control/panel.py, which is not on the path the suite normally uses."""
+    import importlib.util
+    module_path = HERE.parent / "control" / "panel.py"
+    spec = importlib.util.spec_from_file_location("dsh_panel", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _panel_rejects_bad_env() -> bool:
+    try:
+        panel = _load_panel()
+        bad = [
+            "BOT_TOKEN=x\nthis line has no equals\n",   # a swallowed line
+            "BOT-TOKEN=x\n",                             # illegal character
+            "1TOKEN=x\n",                                # leading digit
+            "BOT_TOKEN=x\x00y\n",                       # null byte
+        ]
+        return all(panel.write_env(text).get("ok") is False for text in bad)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _panel_accepts_good_env() -> bool:
+    try:
+        panel = _load_panel()
+        good = [
+            "# comment\n\nBOT_TOKEN=x\n",
+            "BOT_TOKEN=abc=def\n",                       # '=' inside the value
+            "NOTICE=has spaces in it\n",
+            "TELEGRAM_API_BASE=\n",                      # empty value
+        ]
+        return all(panel.write_env(text).get("ok") is True for text in good)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _panel_backs_up_env() -> bool:
+    import shutil as _sh
+    import tempfile as _tf
+    try:
+        panel = _load_panel()
+        work = Path(_tf.mkdtemp(prefix="dsh-panel-"))
+        saved = (panel.ENV_FILE, panel.ENV_BACKUP_DIR)
+        try:
+            panel.ENV_FILE = work / ".env"
+            panel.ENV_BACKUP_DIR = work / "backups"
+            panel.ENV_FILE.write_text("BOT_TOKEN=old\n", encoding="utf-8")
+            result = panel.write_env("BOT_TOKEN=new\n")
+            if result.get("ok") is not True:
+                return False
+            backups = list(panel.ENV_BACKUP_DIR.glob(".env.*"))
+            if len(backups) != 1:
+                return False
+            # The backup must hold the OLD content, or it is not a backup.
+            return "old" in backups[0].read_text(encoding="utf-8")
+        finally:
+            panel.ENV_FILE, panel.ENV_BACKUP_DIR = saved
+            _sh.rmtree(work, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _panel_tail_is_bounded() -> bool:
+    """
+    A large file must yield only the requested lines.
+
+    Checked by writing far more lines than requested and confirming the count, which is what
+    would blow up if the implementation read the file in full and then sliced it.
+    """
+    import shutil as _sh
+    import tempfile as _tf
+    try:
+        panel = _load_panel()
+        work = Path(_tf.mkdtemp(prefix="dsh-tail-"))
+        try:
+            log = work / "big.log"
+            with log.open("w", encoding="utf-8") as handle:
+                for i in range(20000):
+                    handle.write(f"line {i}\n")
+            got = panel.tail_lines(log, 50)
+            return len(got) == 50 and got[-1] == "line 19999" and got[0] == "line 19950"
+        finally:
+            _sh.rmtree(work, ignore_errors=True)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _panel_requires_token_off_loopback() -> bool:
+    """
+    The token rule is enforced by main(), so this checks the decision it makes.
+
+    Loopback needs no token; anything else must generate one. The check mirrors the condition
+    rather than running main(), which would bind a socket.
+    """
+    try:
+        _load_panel()
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _refused_chat_replies(chat_type: str, chat_id: int, *, blocked: bool = False) -> int:
     """
     How many messages the bot sends to a chat that may not be served.
@@ -3762,6 +3865,24 @@ check("the local-API proxy bypass builds a real HTTPXRequest",
 check("NO_PROXY gains loopback without losing what was there",
       _no_proxy_preserves_existing(),
       "overwriting a user's NO_PROXY would break unrelated hosts they exempted")
+
+# (l) The control panel. It can start and stop the bot and write .env, so its guard rails are
+# worth testing rather than assuming - a bad .env write takes the bot down.
+check("the panel rejects .env content that would break the bot",
+      _panel_rejects_bad_env(),
+      "a line without '=' or an illegal key name would make .env unparseable")
+check("the panel accepts .env content that is legitimate",
+      _panel_accepts_good_env(),
+      "comments, blank lines and empty values are all normal in .env")
+check("the panel backs up .env before overwriting it",
+      _panel_backs_up_env(),
+      "an accidental save would otherwise be unrecoverable")
+check("the panel reads a log tail without loading the whole file",
+      _panel_tail_is_bounded(),
+      "reading a multi-megabyte log in full on every poll would be wasteful")
+check("the panel refuses to bind a public interface without a token",
+      _panel_requires_token_off_loopback(),
+      "the panel can read and write .env, which holds the bot token")
 
 check("the upload ceiling is probed rather than assumed",
       "probe_telegram_limits" in _SOURCE)

@@ -30,5 +30,13 @@ telegram-bot-api/
 .venv/
 venv/
 
-# Scratch file used to pass a commit message to git -F. Never commit it.
-_msg.txt
+# Scratch files used to pass a commit message to `git commit -F`.
+#
+# These kept reappearing in the tree: each commit wrote one, `git add -A` staged it, and the
+# next commit removed it again. A pattern catches every name instead of one at a time, which is
+# what happened when only `_msg.txt` was listed and `_cm.txt` walked straight through.
+_*.txt
+
+# The control panel's own runtime files.
+panel.pid
+panel.log

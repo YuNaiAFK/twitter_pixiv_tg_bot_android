@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f1115">
+<!--
+  Added to the home screen this behaves like an app: its own icon, no browser chrome, and it
+  keeps working with no network because everything is served from 127.0.0.1 inside the phone.
+-->
+<link rel="manifest" href="/manifest.webmanifest">
+<title>Bot 控制台</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card: #171a21;
+    --card-2: #1e222b;
+    --line: #272c37;
+    --fg: #e6e9ef;
+    --dim: #8b93a7;
+    --accent: #4f8cff;
+    --ok: #35c07a;
+    --warn: #e8b23a;
+    --bad: #e5534b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 system-ui, -apple-system, "Noto Sans TC", sans-serif; }
+  body { padding: 12px 12px calc(20px + env(safe-area-inset-bottom)); }
+
+  header { display: flex; align-items: baseline; gap: 10px; margin: 4px 2px 14px; }
+  header h1 { font-size: 19px; margin: 0; font-weight: 650; }
+  header .sub { color: var(--dim); font-size: 12px; margin-left: auto; font-family: var(--mono); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  @media (max-width: 360px) { .grid { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 13px; }
+  .card .label { color: var(--dim); font-size: 12px; letter-spacing: .02em; }
+  .card .value { font-size: 17px; font-weight: 600; margin-top: 3px;
+    display: flex; align-items: center; gap: 7px; }
+  .card .detail { color: var(--dim); font-size: 12px; margin-top: 3px;
+    font-family: var(--mono); overflow-wrap: anywhere; }
+
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--dim); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px rgba(53,192,122,.6); }
+  .dot.off { background: var(--bad); }
+  .dot.warn { background: var(--warn); }
+  .on-text { color: var(--ok); } .off-text { color: var(--bad); } .warn-text { color: var(--warn); }
+
+  h2 { font-size: 13px; color: var(--dim); font-weight: 600; margin: 18px 2px 8px;
+    letter-spacing: .04em; text-transform: uppercase; }
+
+  .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 8px; }
+  .row.two { grid-template-columns: 1fr 1fr; }
+  .row.one { grid-template-columns: 1fr; }
+
+  button { font: inherit; font-weight: 600; color: var(--fg); background: var(--card-2);
+    border: 1px solid var(--line); border-radius: 11px; padding: 14px 8px; min-height: 50px;
+    cursor: pointer; transition: transform .06s, background .12s; }
+  button:active { transform: scale(.97); background: #262b36; }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #1d3a6b; border-color: #2c56a0; }
+  button.danger { background: #4a1f1e; border-color: #7d2f2c; }
+  button.ghost { background: transparent; }
+  button.small { min-height: 40px; padding: 9px 12px; font-size: 13px; font-weight: 500; }
+
+  pre.log { background: #0a0c10; border: 1px solid var(--line); border-radius: 12px;
+    padding: 11px 12px; margin: 0; font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
+    white-space: pre-wrap; overflow-wrap: anywhere; max-height: 48vh; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; }
+  pre.log .ERROR, pre.log .CRITICAL { color: #ff8a80; }
+  pre.log .WARNING { color: #ffd479; }
+  pre.log .INFO { color: #a8c7ff; }
+
+  .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+  .bar .spacer { margin-left: auto; }
+  .pill { font-size: 12px; color: var(--dim); background: var(--card); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 11px; font-family: var(--mono); }
+  .pill.live { color: var(--ok); border-color: #24513a; }
+
+  textarea { width: 100%; min-height: 46vh; background: #0a0c10; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.55; resize: vertical; }
+  .hint { color: var(--dim); font-size: 12px; margin: 8px 2px; }
+
+  #toast { position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: calc(18px + env(safe-area-inset-bottom)); background: #22262f; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 10px; padding: 11px 16px; font-size: 13.5px;
+    max-width: calc(100vw - 32px); box-shadow: 0 8px 28px rgba(0,0,0,.5); opacity: 0;
+    pointer-events: none; transition: opacity .18s; z-index: 50; }
+  #toast.show { opacity: 1; }
+  #toast.ok { border-color: #24513a; } #toast.bad { border-color: #7d2f2c; }
+  #toast pre { margin: 6px 0 0; font-family: var(--mono); font-size: 11px; max-height: 130px;
+    overflow: auto; white-space: pre-wrap; }
+
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 13px; padding: 6px 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Bot 控制台</h1>
+  <span class="sub" id="clock">—</span>
+</header>
+
+<div class="grid">
+  <div class="card">
+    <div class="label">機器人</div>
+    <div class="value"><span class="dot" id="bot-dot"></span><span id="bot-text">—</span></div>
+    <div class="detail" id="bot-detail">—</div>
+  </div>
+  <div class="card">
+    <div class="label">自架伺服器 :8081</div>
+    <div class="value"><span class="dot" id="srv-dot"></span><span id="srv-text">—</span></div>
+    <div class="detail" id="srv-detail">—</div>
+  </div>
+  <div class="card">
+    <div class="label">梯子</div>
+    <div class="value"><span class="dot" id="pxy-dot"></span><span id="pxy-text">—</span></div>
+    <div class="detail" id="pxy-detail">—</div>
+  </div>
+  <div class="card">
+    <div class="label">磁碟 / 快取</div>
+    <div class="value"><span id="disk-text">—</span></div>
+    <div class="detail" id="disk-detail">—</div>
+  </div>
+</div>
+
+<h2>機器人</h2>
+<div class="row">
+  <button class="primary" onclick="act('/api/bot/start')">啟動</button>
+  <button class="danger"  onclick="act('/api/bot/stop')">關閉</button>
+  <button onclick="act('/api/bot/restart')">重啟</button>
+</div>
+
+<h2>伺服器（2000 MB 上傳）</h2>
+<div class="row">
+  <button class="primary" onclick="act('/api/server/start')">啟動</button>
+  <button class="danger"  onclick="act('/api/server/stop')">關閉</button>
+  <button onclick="act('/api/server/restart')">重啟</button>
+</div>
+
+<h2>記錄</h2>
+<div class="bar">
+  <button class="small ghost" id="live-btn" onclick="toggleLive()">暫停自動更新</button>
+  <button class="small ghost" onclick="loadLog(true)">重新載入</button>
+  <span class="pill" id="log-meta">—</span>
+</div>
+<pre class="log" id="log">載入中…</pre>
+
+<h2>工具</h2>
+<div class="row two">
+  <button onclick="act('/api/cache/clear')">清除快取</button>
+  <button onclick="openEnv()">編輯 .env</button>
+</div>
+
+<details>
+  <summary>關於這個面板</summary>
+  <div class="hint">
+    按鈕執行的是專案裡既有的 <code>run-bot.sh</code> 與 <code>run-server.sh</code>，
+    所以行為和命令列完全一致。<br><br>
+    <strong>只綁定 127.0.0.1</strong>，只有這支手機連得到。這個面板能讀寫 <code>.env</code>（內含 token），
+    所以不要把它開到區網上。<br><br>
+    重開機後面板不會自動啟動；bot 與伺服器由 <code>~/.termux/boot/10-bot.sh</code> 負責。
+  </div>
+</details>
+
+<div id="env-modal" style="display:none">
+  <h2>.env</h2>
+  <div class="hint">存檔前會自動備份到 <code>data/env-backups/</code>。行尾強制為 LF。</div>
+  <textarea id="env-text" spellcheck="false"></textarea>
+  <div class="row two" style="margin-top:8px">
+    <button class="primary" onclick="saveEnv()">儲存</button>
+    <button onclick="closeEnv()">取消</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let liveTimer = null;
+let lastLogSize = -1;
+let toastTimer = null;
+
+function toast(msg, kind = "", detail = "") {
+  const el = $("toast");
+  el.className = "show " + kind;
+  el.innerHTML = msg + (detail ? "<pre>" + escapeHtml(detail) + "</pre>" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = ""; }, kind === "bad" ? 9000 : 3500);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function setStatus(id, state, text, detail) {
+  const dot = $(id + "-dot");
+  dot.className = "dot " + state;
+  $(id + "-text").textContent = text;
+  $(id + "-text").className = state === "on" ? "on-text" : state === "off" ? "off-text" : state === "warn" ? "warn-text" : "";
+  if (detail !== undefined) $(id + "-detail").textContent = detail;
+}
+
+function bytes(n) {
+  if (n === undefined || n === null) return "—";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return (i === 0 ? n : n.toFixed(1)) + " " + u[i];
+}
+
+async function refreshStatus() {
+  try {
+    const r = await fetch("/api/status", { cache: "no-store" });
+    const s = await r.json();
+
+    setStatus("bot", s.bot.running ? "on" : "off",
+              s.bot.running ? "執行中" : "已停止",
+              s.bot.running ? `pid ${s.bot.pid}（${s.bot.how}）` : s.bot.how);
+    setStatus("srv", s.server.running ? "on" : "off",
+              s.server.running ? "執行中" : "已停止",
+              s.server.running ? `pid ${s.server.pid}（${s.server.how}）` : s.server.how);
+
+    if (!s.proxy.configured) {
+      setStatus("pxy", "off", "未設定", "~/.proxy-url 不存在");
+    } else if (s.proxy.listening) {
+      setStatus("pxy", "on", "可用", s.proxy.url);
+    } else {
+      // Worth flagging loudly: with the VPN down the bot looks broken while being fine, and
+      // every download fails.
+      setStatus("pxy", "warn", "無回應", s.proxy.url + "（請確認 v2rayNG）");
+    }
+
+    $("disk-text").textContent = s.disk.free_h ? s.disk.free_h + " 可用" : "—";
+    $("disk-detail").textContent = "快取 " + (s.cache_h || "—");
+    $("clock").textContent = new Date(s.time * 1000).toLocaleTimeString("zh-TW", { hour12: false });
+  } catch (e) {
+    setStatus("bot", "off", "無法連線", String(e));
+  }
+}
+
+function colourise(line) {
+  const esc = escapeHtml(line);
+  if (/\b(ERROR|CRITICAL|Traceback)\b/.test(line)) return '<span class="ERROR">' + esc + "</span>";
+  if (/\bWARNING\b/.test(line)) return '<span class="WARNING">' + esc + "</span>";
+  if (/\bINFO\b/.test(line)) return '<span class="INFO">' + esc + "</span>";
+  return esc;
+}
+
+async function loadLog(force) {
+  try {
+    const r = await fetch("/api/log?lines=400", { cache: "no-store" });
+    const d = await r.json();
+    // Skip the redraw when nothing changed: replacing the DOM resets the scroll position, which
+    // makes the log unusable while it is being watched.
+    if (!force && d.size === lastLogSize) return;
+    lastLogSize = d.size;
+    const box = $("log");
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    box.innerHTML = (d.lines || []).map(colourise).join("\n") || "（沒有記錄）";
+    if (force || atBottom) box.scrollTop = box.scrollHeight;
+    $("log-meta").textContent = bytes(d.size);
+  } catch (e) {
+    $("log").textContent = "無法讀取記錄：" + e;
+  }
+}
+
+function toggleLive() {
+  if (liveTimer) {
+    clearInterval(liveTimer); liveTimer = null;
+    $("live-btn").textContent = "開始自動更新";
+    $("live-btn").classList.add("ghost");
+  } else {
+    liveTimer = setInterval(() => { loadLog(false); refreshStatus(); }, 2500);
+    $("live-btn").textContent = "暫停自動更新";
+    loadLog(true);
+  }
+}
+
+async function act(path) {
+  const buttons = document.querySelectorAll("button");
+  buttons.forEach((b) => (b.disabled = true));
+  toast("執行中…");
+  try {
+    const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const d = await r.json();
+    const out = [d.stdout, d.stderr].filter(Boolean).join("\n").trim();
+    if (d.ok) toast("完成", "ok", out);
+    else toast("失敗", "bad", out || d.error || "沒有輸出");
+    await refreshStatus();
+    await loadLog(true);
+  } catch (e) {
+    toast("失敗", "bad", String(e));
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+  }
+}
+
+async function openEnv() {
+  try {
+    const r = await fetch("/api/env", { cache: "no-store" });
+    const d = await r.json();
+    $("env-text").value = d.text || "";
+    document.querySelectorAll("body > *:not(#env-modal):not(#toast)").forEach((el) => (el.style.display = "none"));
+    $("env-modal").style.display = "block";
+  } catch (e) {
+    toast("讀取失敗", "bad", String(e));
+  }
+}
+
+function closeEnv() {
+  $("env-modal").style.display = "none";
+  document.querySelectorAll("body > *:not(#env-modal):not(#toast)").forEach((el) => (el.style.display = ""));
+}
+
+async function saveEnv() {
+  try {
+    const r = await fetch("/api/env", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: $("env-text").value }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      toast("已儲存。要讓設定生效請重啟機器人。", "ok");
+      closeEnv();
+      await refreshStatus();
+    } else {
+      toast("未儲存", "bad", d.error || "格式錯誤");
+    }
+  } catch (e) {
+    toast("儲存失敗", "bad", String(e));
+  }
+}
+
+refreshStatus();
+loadLog(true);
+toggleLive();
+setInterval(refreshStatus, 5000);
+</script>
+</body>
+</html>
