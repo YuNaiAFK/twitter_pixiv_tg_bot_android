@@ -1,0 +1,17 @@
+Add termux-bootstrap.sh: one command to run inside the Termux app
+
+Android grants network access per process, keyed on the SELinux domain. Termux's own process
+runs as u:r:untrusted_app_27:s0:c209,... and has it; a process started over adb with
+su 10209 lands in u:r:magisk:s0 and does not. Measured: every connection from it fails with
+socket: Permission denied, including a bare ping 8.8.8.8, while uid 0 succeeds. So the
+network-dependent steps cannot be driven from a PC - the installer has to run in the app.
+
+This script is that installer, written to survive the two failures that actually happen here:
+
+  - the default Termux mirror is mirror.mephi.ru, in Russia, which does not answer from
+    mainland China - pkg then fails with "None of the mirrors are accessible". Five mirrors
+    are tried in order (Tsinghua, USTC, NJU, then the official ones) and the first that serves
+    its Release file is written into sources.list.d, with the default entry blanked so it
+    cannot be used as a fallback.
+  - the server build is a 20-60 minute CPU-bound compile, so it is confirmed interactively
+    and can be skipped with --no-server.
