@@ -1,3 +1,0 @@
-Remove _msg.txt, committed by accident
-
-The file was a scratch holder for a commit message; the git -F trick needed a file on disk and I did not delete it before add -A in one of the batches. Nothing references it.

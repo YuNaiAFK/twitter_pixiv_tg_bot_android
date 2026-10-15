@@ -1,0 +1,13 @@
+# Credential files go here. This file only exists so the directory is present in a fresh clone.
+#
+# Expected, in Netscape cookie format:
+#
+#   twitter.txt    X/Twitter
+#   pixiv.txt      Pixiv
+#   ehentai.txt    e-hentai / exhentai
+#
+# Browser cookie export is NOT used: Android's kernel blocks ptrace by default, so reading a
+# browser's cookie database cannot work. These are plain files, which is why the bot works here
+# at all - see README.
+#
+# Everything in this directory is gitignored. Do not commit credentials.

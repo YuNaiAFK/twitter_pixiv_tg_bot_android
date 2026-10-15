@@ -1,6 +1,12 @@
 # Secrets and credentials - never commit these.
 .env
-cookies/
+# `cookies/*` rather than `cookies/`, so the directory itself is not excluded. Git cannot
+# re-include a file inside an excluded DIRECTORY, so `cookies/` together with
+# `!cookies/.gitkeep` silently kept ignoring the placeholder - verified with
+# `git check-ignore -v`, which still reported the `cookies/` rule. Excluding the contents
+# leaves the negation working, so a fresh clone still gets the directory.
+cookies/*
+!cookies/.gitkeep
 *.session
 authorized.json
 parse_cache.json
