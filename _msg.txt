@@ -1,26 +1,23 @@
-Keep local Bot API traffic off the VPN
+Only record a bot pid that is alive, and find the bot when the pid file lies
 
-With a self-hosted server on 127.0.0.1:8081, every Bot API call was being tunnelled out to the
-VPN and back. python-telegram-bot's HTTPXRequest defaults to trust_env=True, so httpx reads
-HTTP_PROXY / HTTPS_PROXY / ALL_PROXY from the environment - and on the phone those are set in
-~/.bashrc so gallery-dl can reach Twitter, Pixiv and e-hentai.
+Two faults in run-bot.sh, both hit in practice.
 
-Measured: /proc/net/tcp showed the established socket to 127.0.0.1:8081 owned by the VPN's uid
-(10201) rather than the bot's (10209). It works, but it adds a round trip through the tunnel to
-every getUpdates and every upload, and it would break outright on a VPN configured to bypass
-local addresses.
+1. The pid file was written immediately after the background start, before the liveness check
+   five lines later. A start that failed - here, because another instance held the single-instance
+   lock - left its dead pid in the file.
 
-Two changes:
+2. `--stop` trusted that file. Reading a dead pid, it reported "not running" and left the real bot
+   alive and holding the Telegram poll, so every subsequent start was refused by the lock and the
+   only way out was a manual kill. That is exactly what happened: the running bot kept its pid
+   while the file pointed at two successive dead attempts.
 
-  - telegram_base_is_local() decides whether the base URL is loopback, and PTB's HTTPXRequest
-    gets trust_env=False when it is. Only loopback: a *remote* self-hosted server is a normal
-    case and must keep using the proxy.
-  - bypass_proxy_for_loopback() adds 127.0.0.1, localhost and ::1 to NO_PROXY at startup. That
-    covers the bot's own client and every subprocess too, since requests and aiohttp honour it -
-    existing entries are preserved rather than overwritten.
+Changes:
 
-Three checks added, including one for the case where a user already has a NO_PROXY list.
+  - the pid is written only after `kill -0` confirms the process is alive; a failed start removes
+    the file and additionally reports the lock conflict explicitly, since that cause was only
+    visible buried in the other instance's startup banner
+  - `--stop` tries the pid file, then falls back to `pgrep`/`pkill` on the project's own
+    bot.py path, so a stale or missing file no longer makes the bot unstoppable. The pattern is
+    the full script path rather than a bare "bot.py" so an unrelated process is not caught.
 
-While writing those: the first version of the test failed against correct code, because Windows'
-os.environ is case-insensitive and popping "no_proxy" also removed the "NO_PROXY" it had just
-set. The test now says so, so the next person does not chase the same ghost.
+Both are only in the Android copy; the Windows project is untouched.

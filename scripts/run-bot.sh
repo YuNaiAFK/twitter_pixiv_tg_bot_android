@@ -126,31 +126,78 @@ case "$MODE" in
     background)
         say "Starting the bot in the background"
         nohup setsid python "$PROJECT_DIR/bot/bot.py" >>"$LOG_FILE" 2>&1 &
-        echo $! > "$PID_FILE"
+        started_pid=$!
         sleep 5
-        if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
-            ok "started (pid $(cat "$PID_FILE"))"
+        if kill -0 "$started_pid" 2>/dev/null; then
+            # **The pid file is written only after the process is known to be alive.**
+            #
+            # It used to be written immediately, before the liveness check. A start that failed
+            # - because another instance held the single-instance lock, for instance - therefore
+            # left its dead pid in the file, and `--stop` then read that pid, found nothing
+            # running, and left the *real* bot running and holding the Telegram poll. Recovering
+            # from that needed the process to be killed by hand.
+            echo "$started_pid" > "$PID_FILE"
+            ok "started (pid $started_pid)"
             no "log: $LOG_FILE"
             printf '\n    Stop it with:  bash scripts/run-bot.sh --stop\n'
             printf '    The wake lock is held for as long as it runs; release it with\n'
             printf '    termux-wake-unlock if you stop the bot some other way.\n'
         else
+            # Nothing to record: this attempt is gone. Leaving a pid behind is what caused the
+            # problem above.
+            rm -f "$PID_FILE"
             bad "it exited immediately - last lines of the log:"
             tail -n 15 "$LOG_FILE" | sed 's/^/      /' || true
+            # A common cause is worth naming, because the log line for it is buried in the
+            # startup banner of the *other* instance rather than shown as an error here.
+            if tail -n 25 "$LOG_FILE" 2>/dev/null | grep -q '已經有另一個機器人正在執行'; then
+                printf '\n    %sanother bot is already running and holds the single-instance lock%s\n' \
+                    "$(printf '\033[33m')" "$(printf '\033[0m')"
+                printf '    stop it first:  bash scripts/run-bot.sh --stop\n'
+            fi
             exit 1
         fi
         ;;
     stop)
+        # **The pid file is a hint, not the truth.** A stale one - left by an older version of
+        # this script, or by a bot that died without cleaning up - names a process that is not
+        # there, and trusting it means the real bot keeps running and keeps holding the Telegram
+        # poll, so the next start is refused by the single-instance lock and the recovery is a
+        # manual `kill`. So the file is tried first and the process list is the fallback.
+        stopped_any=0
         if [ -f "$PID_FILE" ]; then
-            pid=$(cat "$PID_FILE")
-            kill "$pid" 2>/dev/null || true
-            sleep 2
-            kill -9 "$pid" 2>/dev/null || true
+            pid=$(cat "$PID_FILE" 2>/dev/null || true)
+            if [ -n "$pid" ]; then
+                if kill -0 "$pid" 2>/dev/null; then
+                    kill "$pid" 2>/dev/null || true
+                    sleep 2
+                    kill -9 "$pid" 2>/dev/null || true
+                    ok "stopped pid $pid"
+                    stopped_any=1
+                else
+                    no "pid $pid from the pid file is not running"
+                fi
+            fi
             rm -f "$PID_FILE"
-            command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null || true
-            ok "stopped and wake lock released"
         else
             no "no pid file"
+        fi
+
+        # Anything still running bot.py, whether or not a pid file named it. The pattern is
+        # specific to this project's entry point so an unrelated python process is not hit.
+        if pgrep -f "$PROJECT_DIR/bot/bot.py" >/dev/null 2>&1; then
+            no "found bot.py still running; stopping it"
+            pkill -f "$PROJECT_DIR/bot/bot.py" 2>/dev/null || true
+            sleep 2
+            pkill -9 -f "$PROJECT_DIR/bot/bot.py" 2>/dev/null || true
+            stopped_any=1
+        fi
+
+        if [ "$stopped_any" = "1" ]; then
+            command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock 2>/dev/null || true
+            ok "wake lock released"
+        else
+            no "nothing was running"
         fi
         ;;
 esac
