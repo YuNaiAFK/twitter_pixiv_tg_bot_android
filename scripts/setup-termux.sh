@@ -279,6 +279,36 @@ echo "==> telegram-bot-api (TDLib is fetched and built by its own CMake)"
 rm -rf /opt/telegram-bot-api
 git clone --depth 1 https://github.com/tdlib/telegram-bot-api.git /opt/telegram-bot-api
 cd /opt/telegram-bot-api
+
+# **`td` is a git submodule, and without it CMake fails in a way that names the wrong thing.**
+#
+# The top-level CMakeLists.txt does:
+#
+#     add_subdirectory(td EXCLUDE_FROM_ALL)                        # line 5
+#     set(CMAKE_MODULE_PATH ".../td/CMake" "${CMAKE_MODULE_PATH}")  # line 10
+#     include(PreventInSourceBuild)                                # line 21
+#     prevent_in_source_build()                                    # line 22
+#
+# A plain `git clone` leaves td/ empty, so CMAKE_MODULE_PATH points at nothing, `include()`
+# fails without stopping the configure, and the error surfaces one line later as:
+#
+#     CMake Error at CMakeLists.txt:22 (prevent_in_source_build):
+#       Unknown CMake command "prevent_in_source_build".
+#
+# That reads like a broken upstream CMakeLists or a missing CMake package, neither of which is
+# true - the file exists, in the submodule. `--recursive` is not implied by `--depth 1`.
+echo "==> submodules (td provides PreventInSourceBuild.cmake and all of TDLib)"
+git submodule update --init --recursive
+
+if [ ! -f td/CMake/PreventInSourceBuild.cmake ]; then
+    echo "ERROR: td/CMake/PreventInSourceBuild.cmake is still missing after the submodule update."
+    echo "       Check the network and re-run; the build cannot configure without it."
+    exit 1
+fi
+echo "    submodules present"
+
+# CMAKE_BUILD_TYPE=Release and the install prefix are set on the configure line; the build
+# target is built separately so a failure names the step.
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
 # -j2 deliberately: a phone has 8 cores but thermal-throttles, and a killed build wastes far
 # more time than a slower one.

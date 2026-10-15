@@ -1,17 +1,26 @@
-Do not require root to build the server; proot needs none
+Initialise the td submodule, without which CMake cannot configure
 
-The build stopped right before the chroot with:
+The first chroot build reached CMake and failed with:
 
-    building the server needs root (a chroot is required). Re-run with su.
+    CMake Error at CMakeLists.txt:22 (prevent_in_source_build):
+      Unknown CMake command "prevent_in_source_build".
 
-That check was wrong for this technique. proot implements chroot and mount with ptrace inside a
-userspace process and needs no privileges - that is exactly why it works on an unrooted Android.
-What needs root is a real chroot(2)/mount(2) build, which is a different approach.
+That message points at the wrong thing. The top-level CMakeLists.txt does:
 
-Measured on this device as the normal Termux user: `proot-distro list` answers normally rather
-than reporting a permission problem, and $PREFIX/var/lib and $PREFIX/tmp - where it keeps
-containers and downloads - are both writable by that user.
+    add_subdirectory(td EXCLUDE_FROM_ALL)                          # line 5
+    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/td/CMake")  # line 10
+    include(PreventInSourceBuild)                                  # line 21
+    prevent_in_source_build()                                      # line 22
 
-The advice to "Re-run with su" was actively harmful. su moves the process into u:r:magisk:s0, a
-domain that cannot read Termux's own directories, so running the build as root would have broken
-it rather than fixed it. The script now warns if it is ever run as root.
+`td` is a git submodule. `git clone --depth 1` does not fetch submodules, and `--recursive` is
+not implied by `--depth 1`, so td/ was empty and td/CMake/PreventInSourceBuild.cmake did not
+exist. `include()` of a missing module is not fatal in CMake, so the configure carried on and
+the failure surfaced one line later as an unknown command - which reads like a broken upstream
+CMakeLists or a missing CMake package, and is neither.
+
+Added `git submodule update --init --recursive` after the clone, plus an explicit check that
+td/CMake/PreventInSourceBuild.cmake exists afterwards, so if the submodule fetch itself fails
+the error names that instead of blaming CMake.
+
+The Debian rootfs install before this step worked: 706 MB of aarch64 rootfs with g++, git and
+perl in place, so only the source checkout was wrong.
