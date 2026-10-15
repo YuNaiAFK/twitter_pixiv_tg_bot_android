@@ -1,0 +1,1 @@
+Also guard the forbidden pip upgrade in the bootstrap, so it cannot abort on Termux

@@ -222,7 +222,13 @@ else
     info "no HTTP proxy; pip will connect directly"
 fi
 
-python -m pip install --upgrade pip </dev/null 2>&1 | tail -n 2
+python -m pip install --upgrade pip </dev/null 2>&1 | tail -n 2 || true
+# ^ `|| true` on purpose: **Termux forbids this**, because its pip is owned by `pkg`:
+#
+#     ERROR: Installing pip is forbidden, this will break the python-pip package (termux).
+#
+# It is harmless to attempt and pointless to fail on. Left in so the intent is visible, but it
+# can never stop the install. `pkg upgrade` is how pip is moved on Termux.
 if ! python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv </dev/null 2>&1 | tail -n 20; then
     warn "pip install reported a problem"
 fi
