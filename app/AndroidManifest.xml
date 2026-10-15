@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The control app.
+
+  minSdk 24: the oldest release whose Java APIs this uses without reflection, and far below the
+  Android 13 the target phone runs.
+
+  INTERNET is required even though every request goes to 127.0.0.1 - Android enforces the
+  permission by socket, not by destination, so a loopback connection without it throws
+  SecurityException.
+
+  usesCleartextTraffic is required because the panel speaks plain HTTP. Android 9+ blocks
+  cleartext by default, and the block is not relaxed for loopback. `networkSecurityConfig` would
+  be the narrower way to allow only localhost; the broad flag is used here because this app has
+  no other network use at all, and the manifest is the only place that needs to say so.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.yunai.botpanel">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"
+        android:allowBackup="false"
+        android:supportsRtl="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

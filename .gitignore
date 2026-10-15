@@ -40,3 +40,8 @@ _*.txt
 # The control panel's own runtime files.
 panel.pid
 panel.log
+
+# The APK build output and the debug signing key.
+app/build/
+app/debug.keystore
+app/exp/

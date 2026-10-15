@@ -341,3 +341,57 @@ forming. Start it when needed.
     blocks; reading it in full on every poll would get slower every day.
   - **The bot's running state is not taken from the pid file alone.** A stale pid file is how the
     Stop button quietly stops working, so the process list is checked too.
+
+
+## The Android control app
+
+A native app for the same actions as the control panel: start, stop and restart the bot and the
+server, watch the log, clear the cache. `app/` holds it; the APK is built with:
+
+    powershell -File app/build.ps1            # -Install to also push it to the device
+    powershell -File app/build.ps1 -Clean -Install
+
+### It talks to the control panel, not to Termux
+
+Starting the bot means running `run-bot.sh` inside Termux, and an ordinary app cannot do that:
+`com.termux.RUN_COMMAND` requires `allow-external-apps=true` in Termux's properties, and reading
+Termux's log directly is impossible because `/data/data/com.termux/files/home` is not readable by
+another package. The panel already runs inside Termux and already exposes exactly these actions,
+so it is the interface.
+
+**The consequence is stated in the UI rather than hidden**: if the panel is not running the app
+cannot do anything, and it shows a banner naming the command to start it instead of an empty
+screen that looks broken.
+
+    bash control/run-panel.sh start     # required before the app can do anything
+
+### Built without Gradle
+
+Gradle plus the Android Gradle Plugin is roughly 500 MB of downloads and a first build that
+spends minutes resolving dependencies. This app is one activity with no library dependencies, so
+`build.ps1` drives the toolchain underneath AGP directly: `aapt2` compile and link, `javac`, `d8`,
+`zipalign`, `apksigner`. The APK is 37 KB.
+
+The SDK it needs is 541 MB:
+
+    sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+### Two traps that cost real time
+
+**`d8` 8.2.2 crashes on anonymous inner classes compiled by javac 21.** Not on this class
+specifically - a five-line `new Runnable() { ... }` reproduces it:
+
+    Error in .../MainActivity$1.class:
+    java.lang.NullPointerException: Cannot invoke "String.length()" because "<parameter1>" is null
+
+A lambda compiles to `invokedynamic` with no `$1` class file, and a *named* nested class is
+handled fine; only the anonymous form breaks. So there are no anonymous inner classes in this
+app. The obvious replacement - a field initialised with a lambda that reschedules itself - does
+not compile either, because Java rejects a field initialiser that refers to the field being
+initialised. `this::pollOnce` avoids both problems.
+
+**PowerShell turns a native command's stderr into a terminating error** when
+`$ErrorActionPreference = "Stop"`. `keytool` writes its progress to stderr, so a *successful*
+key generation aborted the build. `keytool` and `apksigner` are therefore invoked through
+`cmd /c`, and by full path - going through `cmd` does not inherit PowerShell's PATH additions, so
+a bare `apksigner` was "not recognized".
