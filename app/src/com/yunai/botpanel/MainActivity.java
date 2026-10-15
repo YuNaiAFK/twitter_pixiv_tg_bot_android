@@ -422,6 +422,23 @@ public class MainActivity extends Activity {
                     loadLog(true);
                 })));
 
+        // Its own section, deliberately away from the tools above it.
+        //
+        // Everything else on this screen is recoverable from this screen: stop the bot and the
+        // button beside it starts it again. This is the one control that ends the app's own
+        // usefulness, because the panel it talks to is what goes away last. Separating it makes
+        // it harder to hit by accident, and the confirmation says plainly what to do afterwards.
+        root.addView(section("電源"));
+        LinearLayout shutdownRow = new LinearLayout(this);
+        shutdownRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button shutdown = action("全部關閉（含面板）", false, true, this::confirmShutdown);
+        LinearLayout.LayoutParams wide =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        wide.setMargins(dp(3), dp(3), dp(3), dp(3));
+        shutdown.setLayoutParams(wide);
+        shutdownRow.addView(shutdown);
+        root.addView(shutdownRow);
+
         TextView note = new TextView(this);
         note.setTextSize(11.5f);
         note.setTextColor(Color.parseColor("#8b93a7"));
@@ -887,6 +904,58 @@ public class MainActivity extends Activity {
             bannerDetail.setVisibility(View.VISIBLE);
             bannerButton.setText("隱藏手動指令");
         }
+    }
+
+    /**
+     * Stop the bot, the server and then the panel, and say what happens next.
+     *
+     * **Not routed through act().** That helper reloads the status and the log when the request
+     * returns, and by design the panel is going away at exactly that moment - so the reload would
+     * fail and overwrite the confirmation with a connection error, which reads as "the shutdown
+     * failed" when it did nothing of the kind. This sends the request, stops polling, and lets
+     * the normal status check discover the panel is gone and show the start card on its own.
+     */
+    private void confirmShutdown() {
+        new AlertDialog.Builder(this)
+                .setTitle("全部關閉")
+                .setMessage("會依序關閉：機器人 → 伺服器 → 控制面板。\n\n"
+                        + "面板關掉後，這個 app 就沒有東西可以控制，畫面會變成"
+                        + "「服務尚未啟動」。\n\n"
+                        + "要重新啟動，按那張卡片的「一鍵啟動服務」就好，不需要打開 Termux。")
+                .setPositiveButton("全部關閉", (d, w) -> doShutdown())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void doShutdown() {
+        // Polling off first: every poll from here on would fail and repaint the screen with an
+        // error while the panel is deliberately shutting down.
+        waitingForStart = false;
+        Toast.makeText(this, "已開始關閉…", Toast.LENGTH_SHORT).show();
+        pool.execute(() -> {
+            try {
+                JSONObject result = request("/api/shutdown", true);
+                final boolean ok = result.optBoolean("ok");
+                final String note = result.optString("stdout", "").trim();
+                ui.post(() -> {
+                    if (destroyed) return;
+                    Toast.makeText(this,
+                            ok ? "已開始關閉，面板會在約 2 秒後停止" : "無法關閉：" + note,
+                            ok ? Toast.LENGTH_LONG : Toast.LENGTH_LONG).show();
+                    // A last check after the panel has had time to exit, so the start card appears
+                    // without waiting for the next scheduled poll.
+                    ui.postDelayed(this::refreshStatus, 5000);
+                });
+            } catch (Exception exc) {
+                // Reaching here is normal if the panel exited faster than the reply was read.
+                final String message = describe(exc);
+                ui.post(() -> {
+                    if (destroyed) return;
+                    Toast.makeText(this, "面板已停止（" + message + "）", Toast.LENGTH_LONG).show();
+                    ui.postDelayed(this::refreshStatus, 3000);
+                });
+            }
+        });
     }
 
     private void openInBrowser() {

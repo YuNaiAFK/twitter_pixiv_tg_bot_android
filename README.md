@@ -482,3 +482,41 @@ Two things an installer cannot do, both required before the app can start anythi
 and, once, from inside Termux:
 
     bash ~/twitter_pixiv_tg_bot/scripts/enable-external-apps.sh
+
+
+## Stopping everything
+
+The **電源 → 全部關閉（含面板）** button stops the bot, then the server, then the panel itself,
+and reports what to do next. The panel's page has the same button.
+
+It is in its own section, away from the other tools, because everything else on that screen is
+recoverable from that screen - stop the bot and the button beside it starts it again. This one
+ends the app's own usefulness, since the panel is what goes away last.
+
+### Why the panel answers before it dies
+
+The request arrives over HTTP and the panel is one of the things being stopped. Killing it while
+still handling the request would close the socket before the response was written, and the app
+would report a failure for an action that worked - the worst kind of feedback, because it invites
+the user to press the button again.
+
+So the work is handed to a **detached** process that waits two seconds, and the handler returns
+immediately. Measured: the response arrives in 13 ms, the server is gone by the time it is read,
+and the panel itself exits two seconds later.
+
+`start_new_session=True` is what makes the child survive. Without it the child shares the panel's
+session, killing the panel takes the child with it, and the bot and server are left running with
+no panel to control them.
+
+### Nothing is typed to get back
+
+`POST /api/shutdown` is the same path as pressing the button, and recovery is the **一鍵啟動服務**
+card, which sends `com.termux.RUN_COMMAND` and does not need the panel to be alive. Verified as a
+full cycle: shut down, confirm every process and both ports are gone, then start again from the
+intent alone.
+
+    bash scripts/start-all.sh --stop      # the same thing from a terminal
+    bash scripts/start-all.sh --status    # report only
+
+`--stop` reverses the startup order for the mirror-image reason: the bot is stopped before the
+server it depends on, and the panel goes last so a control surface exists until the very end.

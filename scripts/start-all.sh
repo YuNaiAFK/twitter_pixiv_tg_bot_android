@@ -4,6 +4,7 @@
 #   bash scripts/start-all.sh            # start whatever is not already up
 #   bash scripts/start-all.sh --status   # report only, change nothing
 #   bash scripts/start-all.sh --restart  # stop and start everything
+#   bash scripts/start-all.sh --stop     # stop everything, panel last
 #
 # **This exists so that nothing needs to be typed by hand.** Before it, the panel had to be
 # started from a terminal, and the panel is what the phone app talks to - so the app could not be
@@ -16,6 +17,9 @@
 #   bot     after the server, or it fails its startup probe and falls back to the 50 MB API
 #   panel   last, because it is what the app polls; starting it first would let the app see a
 #           panel whose buttons then fail
+#
+# `--stop` reverses that, for the mirror-image reason: the bot is stopped before the server it
+# depends on, and the panel goes last so the app keeps a control surface until the very end.
 #
 # Every step is idempotent: run-server.sh and run-bot.sh already detect a live instance, and the
 # panel does the same, so a second run reports "already running" rather than starting duplicates.
@@ -32,8 +36,9 @@ MODE="start"
 case "${1:-}" in
     --status)  MODE="status" ;;
     --restart) MODE="restart" ;;
+    --stop)    MODE="stop" ;;
     "")        ;;
-    *) echo "usage: $0 [--status|--restart]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--status|--restart|--stop]" >&2; exit 2 ;;
 esac
 
 mkdir -p "$PROJECT_DIR/data"
@@ -85,6 +90,41 @@ if [ "$MODE" = "status" ]; then
     fi
     if port_open "$PANEL_PORT"; then ok "panel    listening on $PANEL_PORT"; else bad "panel    not listening on $PANEL_PORT"; fi
     printf '\n'
+    exit 0
+fi
+
+# --------------------------------------------------------------------------- stop
+
+if [ "$MODE" = "stop" ]; then
+    say "Stopping everything"
+    log "start-all: stopping"
+
+    # bot first: it is the one holding a Telegram poll, and stopping it before the server it
+    # talks to avoids a burst of connection errors in its log as the server disappears.
+    no "bot      stopping…"
+    bash "$PROJECT_DIR/scripts/run-bot.sh" --stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
+
+    no "server   stopping…"
+    bash "$PROJECT_DIR/scripts/run-server.sh" stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
+
+    # The wake lock was taken for the bot and the server; with both gone it only drains battery.
+    if command -v termux-wake-unlock >/dev/null 2>&1; then
+        termux-wake-unlock 2>/dev/null && no "wake lock released" || true
+    fi
+
+    # **The panel goes last, and after this command has had time to return.**
+    #
+    # Whatever asked for the shutdown is almost certainly the panel's own HTTP API - the phone
+    # app's "stop everything" button - so killing it in the same breath would break the connection
+    # before the response was sent, and the app would report a failure for an action that worked.
+    # The caller is expected to fire this detached and read the reply first; the sleep here is the
+    # belt to that braces, because a caller that does not detach still gets a clean answer.
+    no "panel    stopping in 2s…"
+    sleep 2
+    bash "$PROJECT_DIR/control/run-panel.sh" stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
+
+    printf '\n' | tee -a "$LOG_FILE"
+    log "start-all: stopped"
     exit 0
 fi
 

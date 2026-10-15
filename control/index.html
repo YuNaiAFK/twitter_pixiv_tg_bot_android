@@ -159,6 +159,20 @@
   <button onclick="openEnv()">編輯 .env</button>
 </div>
 
+<h2>電源</h2>
+<div class="row one">
+  <!--
+    Stops the bot, the server and then this panel. The panel answers before it goes, so this
+    reports success and the page simply stops updating a moment later.
+
+    Kept in its own row and away from the other tools: everything above is recoverable from this
+    page, and this is the one button that ends the page's usefulness until the phone app starts
+    the services again.
+  -->
+  <button class="danger" onclick="shutdownAll()">全部關閉（含面板）</button>
+</div>
+<div class="hint" id="shutdown-hint" style="display:none"></div>
+
 <details>
   <summary>關於這個面板</summary>
   <div class="hint">
@@ -166,7 +180,10 @@
     所以行為和命令列完全一致。<br><br>
     <strong>只綁定 127.0.0.1</strong>，只有這支手機連得到。這個面板能讀寫 <code>.env</code>（內含 token），
     所以不要把它開到區網上。<br><br>
-    重開機後面板不會自動啟動；bot 與伺服器由 <code>~/.termux/boot/10-bot.sh</code> 負責。
+    重開機後面板不會自動啟動；bot 與伺服器由 <code>~/.termux/boot/10-bot.sh</code> 負責。<br><br>
+    <strong>關掉面板後</strong>，這個頁面就沒有東西可以連了。要重新啟動，
+    請用 Android app 的「一鍵啟動服務」，或在 Termux 執行
+    <code>bash scripts/start-all.sh</code>。
   </div>
 </details>
 
@@ -301,6 +318,36 @@ async function act(path) {
   } finally {
     buttons.forEach((b) => (b.disabled = false));
   }
+}
+
+function shutdownAll() {
+  if (!confirm("關閉機器人、伺服器與控制面板？\n\n面板關掉後這個頁面就連不上了。\n要重新啟動請用 Android app 的「一鍵啟動服務」。")) {
+    return;
+  }
+  // Not `act()`: once the panel is gone, refreshStatus() and loadLog() would fail and overwrite
+  // the confirmation with a connection error, which reads like the shutdown failed. This sends
+  // the request and then reports the expected consequence instead of polling for it.
+  fetch("/api/shutdown", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+    .then((r) => r.json())
+    .then((d) => {
+      if (!d.ok) {
+        toast("失敗", "bad", d.error || "沒有輸出");
+        return;
+      }
+      // Stop the auto-refresh: every further poll would show "無法讀取記錄" as the panel exits.
+      if (liveTimer) {
+        clearInterval(liveTimer);
+        liveTimer = null;
+        $("live-btn").textContent = "開始自動更新";
+      }
+      const hint = $("shutdown-hint");
+      hint.style.display = "block";
+      hint.innerHTML = "<strong>已開始關閉。</strong>機器人 → 伺服器 → 面板，約 2 秒後面板停止，"
+        + "這個頁面就不會再更新。<br><br>要重新啟動：Android app 的「一鍵啟動服務」，"
+        + "或 Termux 執行 <code>bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh</code>。";
+      toast("已開始關閉", "ok");
+    })
+    .catch((e) => toast("失敗", "bad", String(e)));
 }
 
 async function openEnv() {

@@ -361,6 +361,53 @@ def clear_cache() -> dict:
 # --------------------------------------------------------------------------- actions
 
 
+def action_shutdown() -> dict:
+    """
+    Stop the bot, the server and finally this panel - without the caller seeing a broken connection.
+
+    **The ordering problem this solves.** The request arrives over HTTP from the phone app's
+    "stop everything" button. If the panel killed itself while still handling that request, the
+    socket would close before the response was written and the app would report a failure for an
+    action that actually worked - the worst kind of feedback, because it invites the user to press
+    the button again.
+
+    So the work is handed to a detached process that waits two seconds, and this returns
+    immediately. `start_new_session=True` is what makes it survive: without it the child is in
+    this process's session, and killing the panel takes the child with it, leaving the bot and
+    server running with no panel to control them.
+
+    The shutdown itself is `scripts/start-all.sh --stop`, the mirror of the script that starts
+    everything, so the order lives in one place rather than being duplicated here.
+    """
+    script = SCRIPTS / "start-all.sh"
+    if not script.is_file():
+        return {"ok": False, "error": f"missing {script}"}
+
+    try:
+        # The sleep is in the shell rather than in Python so that nothing is left to this process
+        # once the handler returns - by the time the delay is over, this interpreter may be gone.
+        subprocess.Popen(
+            ["bash", "-c", f"sleep 2; exec bash '{script}' --stop"],
+            cwd=str(PROJECT),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            env=os.environ.copy(),
+        )
+    except OSError as exc:
+        return {"ok": False, "error": f"could not start the shutdown: {exc}"}
+
+    return {
+        "ok": True,
+        "stdout": "已開始關閉：機器人 → 伺服器 → 控制面板。\n"
+                  "面板會在約 2 秒後停止，之後這個頁面就無法再連線。\n"
+                  "要重新啟動，請用 app 的「一鍵啟動服務」。",
+        "stderr": "",
+        "seconds": 0,
+    }
+
+
 def action_bot(verb: str, api_port: int) -> dict:
     script = SCRIPTS / "run-bot.sh"
     if not script.is_file():
@@ -573,6 +620,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/cache/clear":
             self._json(clear_cache())
+            return
+        if path == "/api/shutdown":
+            # Answers first, stops afterwards; see action_shutdown for why the order matters.
+            self._json(action_shutdown())
             return
         if path == "/api/env":
             text = body.get("text")
