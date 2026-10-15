@@ -8106,16 +8106,22 @@ def build_application() -> Application:
     )
     # **With a local server, never let the environment proxy the Bot API calls.**
     #
-    # HTTPXRequest defaults to trust_env=True, so httpx picks up HTTP_PROXY/HTTPS_PROXY/ALL_PROXY.
-    # On a phone those are set for gallery-dl's sake, which meant every getUpdates and every file
-    # upload was tunnelled out to the VPN and back to 127.0.0.1:8081 - measured by the socket to
-    # that port being owned by the VPN's uid instead of the bot's. It works, but it wastes a round
-    # trip through the tunnel on every message and breaks on a VPN that bypasses local addresses.
+    # HTTPXRequest builds its own httpx.AsyncClient and passes it `trust_env=True`, so httpx picks
+    # up HTTP_PROXY/HTTPS_PROXY/ALL_PROXY. On a phone those are set for gallery-dl's sake, which
+    # meant every getUpdates and every file upload was tunnelled out to the VPN and back to
+    # 127.0.0.1:8081 - measured by the socket to that port being owned by the VPN's uid instead of
+    # the bot's. It works, but it wastes a round trip through the tunnel on every message and
+    # breaks on a VPN that bypasses local addresses.
+    #
+    # `trust_env` is NOT a parameter of HTTPXRequest - passing it raised
+    #     TypeError: HTTPXRequest.__init__() got an unexpected keyword argument 'trust_env'
+    # and killed the bot at startup. The signature ends in `httpx_kwargs`, a dict forwarded to
+    # httpx.AsyncClient, which is where trust_env belongs.
     #
     # Only when the base URL is loopback: a *remote* self-hosted server is a normal case and must
     # keep using the proxy.
     if telegram_base_is_local():
-        request_kwargs["trust_env"] = False
+        request_kwargs["httpx_kwargs"] = {"trust_env": False}
         logger.info("Bot API 位於本機，已停用其代理（不經 VPN 繞道）")
     builder = builder.get_updates_request(
         HTTPXRequest(**request_kwargs)

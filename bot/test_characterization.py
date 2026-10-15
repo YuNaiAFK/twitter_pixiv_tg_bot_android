@@ -437,6 +437,28 @@ def _no_proxy_preserves_existing() -> bool:
         importlib.reload(bot)
 
 
+def _httpx_request_accepts_the_bypass() -> bool:
+    """
+    Build the request object the way build_application does for a local server.
+
+    Returns True only if the object is constructed AND trust_env reached the httpx client - both
+    halves matter, since a silently ignored keyword would look like success.
+    """
+    try:
+        from telegram.request import HTTPXRequest
+        request = HTTPXRequest(
+            read_timeout=30,
+            write_timeout=30,
+            connect_timeout=30,
+            pool_timeout=30,
+            media_write_timeout=30,
+            httpx_kwargs={"trust_env": False},
+        )
+        return request._client_kwargs.get("trust_env") is False
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _refused_chat_replies(chat_type: str, chat_id: int, *, blocked: bool = False) -> int:
     """
     How many messages the bot sends to a chat that may not be served.
@@ -3729,6 +3751,14 @@ check("a loopback Bot API base is recognised as local",
 check("a remote Bot API base is NOT treated as local",
       _remote_base_not_local(),
       "disabling the proxy for a remote server would break it behind a firewall")
+# The dataclass-shaped mistake that crashed the bot at startup:
+#     TypeError: HTTPXRequest.__init__() got an unexpected keyword argument 'trust_env'
+# HTTPXRequest has no trust_env parameter; the way to reach httpx is httpx_kwargs. This builds a
+# real HTTPXRequest so a wrong keyword is caught here rather than on the phone.
+check("the local-API proxy bypass builds a real HTTPXRequest",
+      _httpx_request_accepts_the_bypass(),
+      "passing trust_env directly raised TypeError and killed the bot at startup")
+
 check("NO_PROXY gains loopback without losing what was there",
       _no_proxy_preserves_existing(),
       "overwriting a user's NO_PROXY would break unrelated hosts they exempted")

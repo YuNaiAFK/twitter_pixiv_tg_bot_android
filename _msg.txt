@@ -1,23 +1,22 @@
-Only record a bot pid that is alive, and find the bot when the pid file lies
+Pass trust_env through httpx_kwargs, which is what HTTPXRequest accepts
 
-Two faults in run-bot.sh, both hit in practice.
+The previous commit set request_kwargs["trust_env"] = False directly on HTTPXRequest. That
+keyword does not exist and the bot died at startup on the phone:
 
-1. The pid file was written immediately after the background start, before the liveness check
-   five lines later. A start that failed - here, because another instance held the single-instance
-   lock - left its dead pid in the file.
+    File ".../bot/bot.py", line 8121, in build_application
+        HTTPXRequest(**request_kwargs)
+    TypeError: HTTPXRequest.__init__() got an unexpected keyword argument 'trust_env'
 
-2. `--stop` trusted that file. Reading a dead pid, it reported "not running" and left the real bot
-   alive and holding the Telegram poll, so every subsequent start was refused by the lock and the
-   only way out was a manual kill. That is exactly what happened: the running bot kept its pid
-   while the file pointed at two successive dead attempts.
+Its real signature ends with `proxy` and `httpx_kwargs`, and it builds its client with
+`httpx.AsyncClient(**self._client_kwargs)`. So httpx_kwargs is where trust_env belongs:
 
-Changes:
+    HTTPXRequest(..., httpx_kwargs={"trust_env": False})
 
-  - the pid is written only after `kill -0` confirms the process is alive; a failed start removes
-    the file and additionally reports the lock conflict explicitly, since that cause was only
-    visible buried in the other instance's startup banner
-  - `--stop` tries the pid file, then falls back to `pgrep`/`pkill` on the project's own
-    bot.py path, so a stale or missing file no longer makes the bot unstoppable. The pattern is
-    the full script path rather than a bare "bot.py" so an unrelated process is not caught.
+Verified: the object constructs, and `_client_kwargs["trust_env"]` is False, so the value really
+does reach httpx rather than being swallowed.
 
-Both are only in the Android copy; the Windows project is untouched.
+A check now builds a real HTTPXRequest with the same arguments build_application uses and asserts
+that trust_env arrived at the client, so this cannot regress into a startup crash again.
+
+The NO_PROXY half of the change was already correct and is unchanged: httpx honours it under
+trust_env, which is why it covers gallery-dl and the bot's own outbound calls as well.
