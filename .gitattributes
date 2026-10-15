@@ -19,3 +19,7 @@
 *.webp binary
 *.zip  binary
 *.sqlite3 binary
+
+# Installable packages: never line-ending converted.
+*.apk  binary
+*.keystore binary
