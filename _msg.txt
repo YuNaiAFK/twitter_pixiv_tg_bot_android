@@ -1,0 +1,17 @@
+Do not require root to build the server; proot needs none
+
+The build stopped right before the chroot with:
+
+    building the server needs root (a chroot is required). Re-run with su.
+
+That check was wrong for this technique. proot implements chroot and mount with ptrace inside a
+userspace process and needs no privileges - that is exactly why it works on an unrooted Android.
+What needs root is a real chroot(2)/mount(2) build, which is a different approach.
+
+Measured on this device as the normal Termux user: `proot-distro list` answers normally rather
+than reporting a permission problem, and $PREFIX/var/lib and $PREFIX/tmp - where it keeps
+containers and downloads - are both writable by that user.
+
+The advice to "Re-run with su" was actively harmful. su moves the process into u:r:magisk:s0, a
+domain that cannot read Termux's own directories, so running the build as root would have broken
+it rather than fixed it. The script now warns if it is ever run as root.

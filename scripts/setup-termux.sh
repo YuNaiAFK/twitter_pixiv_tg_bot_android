@@ -180,7 +180,25 @@ else
             skip "server not running"
         fi
     else
-        is_root || die "building the server needs root (a chroot is required). Re-run with su."
+        # **No root requirement.** This used to `die` unless running as uid 0, which blocked the
+        # build with "building the server needs root (a chroot is required). Re-run with su."
+        # That was wrong for this approach.
+        #
+        # proot implements chroot and mount with ptrace inside a userspace process; it needs no
+        # privileges, which is the whole reason it works on an unrooted Android. What needs root
+        # is a real chroot(2)/mount(2) build - a different technique from the one used here.
+        #
+        # Measured as a normal user on this device: `proot-distro list` answers normally, and
+        # `$PREFIX/var/lib` and `$PREFIX/tmp` - where it keeps containers and downloads - are
+        # both writable by the Termux user.
+        #
+        # Root is still worth mentioning, because `su` changes the SELinux domain to
+        # `u:r:magisk:s0`, which cannot read Termux's own directories. Running the build as root
+        # would break it, not fix it.
+        if is_root; then
+            warn "running as root: Termux's directories may be unreadable from this domain"
+            warn "run this as the normal Termux user instead"
+        fi
         have proot-distro || die "proot-distro is missing; pkg install proot-distro"
 
         if [ -d "$CHROOT_ROOT" ]; then
