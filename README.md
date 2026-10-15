@@ -547,3 +547,21 @@ These are the pages to go to if you are rebuilding this:
 
 Nothing here is bundled except the APKs in `apk/`, and this project is not affiliated with any of
 those projects.
+
+
+## Versioning
+
+The app, the panel and the scripts carry **one version**, kept in
+[`VERSION.properties`](VERSION.properties). The app shows its own version and the panel's side by
+side in its header, both read from that one file, so a mismatch is visible instead of a mystery.
+
+    powershell -File app/build.ps1 -Bump            # 1.3 -> 1.4   (a new feature)
+    powershell -File app/build.ps1 -Bump -Fix       # 1.3 -> 1.3.1 (a fix only)
+    powershell -File app/build.ps1                  # build at the current version
+
+**Bump it whenever a feature changes.** `-Bump` rewrites `VERSION.properties` before building, so
+a failed build still leaves the number bumped. The build also warns when the app's sources have
+changed since the last bump - not an error, since rebuilding after a failure is legitimate, but
+the reminder is the point.
+
+[VERSIONS.md](VERSIONS.md) lists what each version contained and where the number is used.

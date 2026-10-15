@@ -45,3 +45,6 @@ panel.log
 app/build/
 app/debug.keystore
 app/exp/
+
+# Written while a stop is in flight, so a start cannot race it.
+data/.shutting-down

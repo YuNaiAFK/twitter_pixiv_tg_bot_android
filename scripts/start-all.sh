@@ -41,6 +41,34 @@ case "${1:-}" in
     *) echo "usage: $0 [--status|--restart|--stop]" >&2; exit 2 ;;
 esac
 
+# A marker, so a start cannot race a stop that is still running.
+#
+# **This is not theoretical.** `--stop` takes tens of seconds - `run-server.sh stop` waits for the
+# proot container to shut down - and its last act is to stop the panel. Starting again while that
+# is in flight produces this, which was seen for real:
+#
+#     00:57:20  start-all: done        <- the start finished, panel up
+#     00:57:26  start-all: stopped     <- the stop finished and killed it
+#
+# The user's view is the worst one: press 全部關閉, change your mind, press 一鍵啟動服務, and
+# everything comes up and then silently disappears. Whichever command got there last won.
+#
+# The stopping side writes its pid here first and removes it when it is done. The starting side
+# waits for it to go. If the pid is gone but the file remains - a stop that was killed, or a
+# reboot - the marker is stale and is removed rather than waited on forever.
+SHUTDOWN_MARKER="$PROJECT_DIR/data/.shutting-down"
+
+shutdown_in_progress() {
+    [ -f "$SHUTDOWN_MARKER" ] || return 1
+    local pid
+    pid=$(cat "$SHUTDOWN_MARKER" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "$SHUTDOWN_MARKER"
+    return 1
+}
+
 mkdir -p "$PROJECT_DIR/data"
 
 # Everything also goes to a file, because when this runs from a RUN_COMMAND intent there is no
@@ -96,6 +124,13 @@ fi
 # --------------------------------------------------------------------------- stop
 
 if [ "$MODE" = "stop" ]; then
+    # Claim the marker before touching anything, so a start that begins a moment from now sees it.
+    # `$$` is this shell's pid, which is what shutdown_in_progress checks for liveness.
+    printf '%s\n' "$$" > "$SHUTDOWN_MARKER"
+    # Removed on every exit path, including Ctrl-C and a failure partway, so a crash cannot leave
+    # a marker that blocks every future start.
+    trap 'rm -f "$SHUTDOWN_MARKER"' EXIT INT TERM
+
     say "Stopping everything"
     log "start-all: stopping"
 
@@ -139,6 +174,29 @@ if [ "$MODE" = "restart" ]; then
 fi
 
 # --------------------------------------------------------------------------- start
+
+# Wait out a stop that is still running, rather than starting into it and being killed by it.
+# The timeout is generous because `run-server.sh stop` waits for a proot container to come down,
+# which has been seen to take half a minute on this phone.
+if shutdown_in_progress; then
+    say "A shutdown is still running"
+    no "waiting for it to finish before starting…"
+    waited=0
+    while shutdown_in_progress && [ "$waited" -lt 120 ]; do
+        sleep 2
+        waited=$((waited + 2))
+        if [ $((waited % 10)) -eq 0 ]; then
+            no "  still waiting (${waited}s)"
+        fi
+    done
+    if shutdown_in_progress; then
+        bad "the shutdown did not finish within 120s; starting anyway"
+        rm -f "$SHUTDOWN_MARKER"
+    else
+        ok "the shutdown finished after ${waited}s"
+    fi
+    printf '\n'
+fi
 
 say "Starting services"
 log "start-all: mode=$MODE"

@@ -59,6 +59,44 @@ LOG_TAIL_MAX = 2000
 # --------------------------------------------------------------------------- helpers
 
 
+def project_version() -> dict:
+    """
+    The version of the whole manager, read from VERSION.properties at the project root.
+
+    One number covers the app, this panel and the scripts, because they ship together: a fix in
+    the panel and a fix in the app are the same release, and numbering them separately would let
+    them drift into combinations nobody tested.
+
+    Reading the same file the Android build reads is the point. This panel and the app are the two
+    halves of one control surface, and "which version are you running" is the first question when
+    one behaves differently from the other - so both answer from one source.
+
+    Returns `{"name": ..., "code": ...}`, with the name "?" if the file is missing or malformed.
+    The panel must still start in that case: a missing version is a labelling problem, not a
+    reason to refuse to run.
+    """
+    result = {"name": "?", "code": 0}
+    try:
+        text = (PROJECT / "VERSION.properties").read_text(encoding="utf-8")
+    except OSError:
+        return result
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip()
+        if key == "versionName":
+            result["name"] = value
+        elif key == "versionCode":
+            try:
+                result["code"] = int(value)
+            except ValueError:
+                pass
+    return result
+
+
 def run(cmd: list[str], timeout: int = ACTION_TIMEOUT) -> dict:
     """
     Run a command and return its output.
@@ -444,13 +482,19 @@ def build_status(api_port: int) -> dict:
     bot_up, bot_pid, bot_how = bot_running()
     srv_up, srv_pid, srv_how = server_running(api_port)
     proxy = proxy_state()
+    cache_bytes = dir_size(CACHE_DIR)
+    version = project_version()
     return {
+        # Reported so the app can show which panel it is talking to next to its own version.
+        # They come from the same file, so a mismatch means an old APK or a panel that was not
+        # restarted after an update - both worth seeing rather than guessing at.
+        "version": version,
         "bot": {"running": bot_up, "pid": bot_pid, "how": bot_how},
         "server": {"running": srv_up, "pid": srv_pid, "how": srv_how, "port": api_port},
         "proxy": proxy,
         "disk": disk_usage(PROJECT),
-        "cache_bytes": dir_size(CACHE_DIR),
-        "cache_h": human(dir_size(CACHE_DIR)),
+        "cache_bytes": cache_bytes,
+        "cache_h": human(cache_bytes),
         "log": {
             "path": str(LOG_FILE),
             "size": LOG_FILE.stat().st_size if LOG_FILE.is_file() else 0,

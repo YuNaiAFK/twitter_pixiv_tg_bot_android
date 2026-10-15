@@ -97,7 +97,7 @@ public class MainActivity extends Activity {
     private TextView srvValue, srvDetail;
     private TextView pxyValue, pxyDetail;
     private TextView diskValue, diskDetail;
-    private TextView logView, logMeta, bannerText, bannerTitle, bannerDetail;
+    private TextView logView, logMeta, bannerText, bannerTitle, bannerDetail, versionLabel;
     private View banner;
     private Button liveButton, bannerButton;
     /** What the banner's button should do next; see onBannerButton(). */
@@ -253,6 +253,37 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#0f1115"));
         root.setPadding(dp(12), dp(14), dp(12), dp(14));
+
+        // A header carrying the version, at the top where it is always in view.
+        //
+        // The version is read from the installed package rather than from a constant here, so it
+        // cannot drift from the APK. Knowing which build is on the phone matters more than it
+        // sounds: this app, the panel it drives and the scripts behind both change together, and
+        // "which version are you running" is the first question when they disagree.
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setPadding(dp(3), 0, dp(3), dp(2));
+
+        TextView title = new TextView(this);
+        // Resolved from the manifest rather than from `R.string.app_name`. This app uses no `R`
+        // class at all - there is nothing to generate it for, since the only resource values are
+        // the app name and the icons - and depending on a generated class for one string would be
+        // a poor trade. It also cannot disagree with the launcher label, because it is the same
+        // lookup Android performs.
+        title.setText(appLabel());
+        title.setTextSize(17f);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(Color.parseColor("#e6e9f0"));
+        header.addView(title);
+
+        versionLabel = new TextView(this);
+        versionLabel.setTextSize(11.5f);
+        versionLabel.setTextColor(Color.parseColor("#8b93a7"));
+        versionLabel.setPadding(0, dp(4), 0, 0);
+        header.addView(versionLabel);
+        showVersions(null);
+
+        root.addView(header);
 
         // The "start everything" card.
         //
@@ -707,6 +738,9 @@ public class MainActivity extends Activity {
                 final JSONObject bot = s.getJSONObject("bot");
                 final JSONObject srv = s.getJSONObject("server");
                 final JSONObject pxy = s.getJSONObject("proxy");
+                // Absent on a panel from before versions were reported; optString handles that.
+                final String panelVersion = s.optJSONObject("version") == null ? ""
+                        : s.getJSONObject("version").optString("name", "");
 
                 // Built here rather than inside the runnable so a JSONException cannot leave the
                 // UI half-updated.
@@ -729,6 +763,7 @@ public class MainActivity extends Activity {
                     waitingForStart = false;
                     startWaitTicks = 0;
                     hideBanner();
+                    showVersions(panelVersion);
 
                     botValue.setText(botUp ? "執行中" : "已停止");
                     botValue.setTextColor(Color.parseColor(botUp ? "#35c07a" : "#e5534b"));
@@ -768,6 +803,7 @@ public class MainActivity extends Activity {
                     diskValue.setText("—");
                     // The panel is the only way this app can act, so an unreachable one is the
                     // single failure worth a full card rather than a red dot.
+                    showVersions(null);
                     if (!waitingForStart) {
                         showCard("服務尚未啟動",
                                 "這個 app 透過 Termux 裡的控制面板運作，而面板現在沒有回應（"
@@ -956,6 +992,57 @@ public class MainActivity extends Activity {
                 });
             }
         });
+    }
+
+    /**
+     * The app's own label, as the launcher shows it.
+     *
+     * Read from the package rather than from a string constant so it cannot disagree with the
+     * icon on the home screen. See the note where it is used for why this is not `R.string`.
+     */
+    private String appLabel() {
+        try {
+            return getApplicationInfo().loadLabel(getPackageManager()).toString();
+        } catch (Exception exc) {
+            return "Bot 控制台";
+        }
+    }
+
+    /**
+     * The version of the app that is installed, read from its own package.
+     *
+     * `versionName` comes from the manifest, which `build.ps1` fills in from
+     * `app/version.properties` - so this is the number the APK was actually built with, not a
+     * string kept in step by hand.
+     */
+    private String appVersionName() {
+        try {
+            return "v" + getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception exc) {
+            // NameNotFoundException cannot happen for our own package; a resource or security
+            // problem could, and a missing version must not stop the app from starting.
+            return "v?";
+        }
+    }
+
+    /**
+     * Show this app's version, and the panel's when it is known.
+     *
+     * Both come from the same `VERSION.properties` - the app's through its package metadata at
+     * build time, the panel's over `/api/status` - so any difference means one of them is stale.
+     * That is worth a glance rather than a mystery: a panel that was not restarted after an update
+     * behaves like the old panel, and an app installed from an older APK likewise.
+     *
+     * @param panelVersion the panel's version, or null when it has not answered
+     */
+    private void showVersions(String panelVersion) {
+        if (versionLabel == null) return;
+        String mine = appVersionName();
+        if (panelVersion == null || panelVersion.isEmpty()) {
+            versionLabel.setText("  " + mine + "   面板 —");
+        } else {
+            versionLabel.setText("  " + mine + "   面板 v" + panelVersion);
+        }
     }
 
     private void openInBrowser() {

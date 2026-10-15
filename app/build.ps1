@@ -20,7 +20,11 @@ param(
     [string]$Sdk   = "D:\TG_Bot\_android_tools\sdk",
     [string]$AppDir = "",
     [switch]$Clean,
-    [switch]$Install
+    [switch]$Install,
+    # Increment the version in version.properties before building. -Bump alone does a minor bump
+    # (new feature); -Bump -Fix does a patch bump (a fix with no new capability).
+    [switch]$Bump,
+    [switch]$Fix
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,6 +68,14 @@ function Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cy
 function Ok($text)   { Write-Host "    $([char]0x2713) $text" -ForegroundColor Green }
 function Bad($text)  { Write-Host "    $([char]0x2717) $text" -ForegroundColor Red }
 function Info($text) { Write-Host "    $([char]0x00B7) $text" -ForegroundColor DarkGray }
+function Warn($text) { Write-Host "    ! $text" -ForegroundColor Yellow }
+
+# -Fix only means anything next to -Bump; without this it would be silently ignored and the build
+# would look like it did a patch bump when it did nothing at all.
+if ($Fix -and -not $Bump) {
+    Warn "-Fix needs -Bump; nothing was bumped"
+    Warn "  use:  build.ps1 -Bump -Fix"
+}
 
 # --------------------------------------------------------------------------- checks
 
@@ -103,19 +115,125 @@ Step "Compiling resources (aapt2 compile)"
 if ($LASTEXITCODE -ne 0) { Bad "aapt2 compile failed with $LASTEXITCODE"; exit 1 }
 Ok "resources compiled"
 
+# --------------------------------------------------------------------------- version
+
+Step "Version"
+
+# At the project root, not under app/: the panel reads the same file, because the app, the panel
+# and the scripts ship together and one version for all of them is the honest description.
+$VersionFile = Join-Path (Split-Path $AppDir -Parent) "VERSION.properties"
+if (-not (Test-Path $VersionFile)) { Bad "missing $VersionFile"; exit 1 }
+
+# Read the two keys, ignoring comments. Reading the file rather than trusting a variable is the
+# point: VERSION.properties is the single source of truth for the version, and this script, the
+# APK metadata and the app's own header all derive from it.
+function Read-VersionFile {
+    param([string]$Path)
+    $values = @{}
+    foreach ($line in (Get-Content $Path)) {
+        $trimmed = $line.Trim()
+        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
+        $eq = $trimmed.IndexOf("=")
+        if ($eq -lt 1) { continue }
+        $values[$trimmed.Substring(0, $eq).Trim()] = $trimmed.Substring($eq + 1).Trim()
+    }
+    return $values
+}
+
+$ver = Read-VersionFile -Path $VersionFile
+if (-not $ver.ContainsKey("versionCode") -or -not $ver.ContainsKey("versionName")) {
+    Bad "version.properties must define versionCode and versionName"
+    exit 1
+}
+$VersionCode = 0
+if (-not [int]::TryParse($ver["versionCode"], [ref]$VersionCode) -or $VersionCode -lt 1) {
+    Bad "versionCode must be a positive integer, got '$($ver['versionCode'])'"
+    exit 1
+}
+$VersionName = $ver["versionName"]
+if ($VersionName -notmatch '^\d+\.\d+(\.\d+)?$') {
+    Bad "versionName must look like 1.2 or 1.2.3, got '$VersionName'"
+    exit 1
+}
+
+# -Bump rewrites the file before anything is built, so a failed build still leaves the version
+# bumped rather than half-applied. -Fix makes it a patch bump instead of a minor one.
+if ($Bump) {
+    $parts = $VersionName.Split(".")
+    $major = [int]$parts[0]
+    if ($Fix) {
+        $minor = [int]$parts[1]
+        $patch = if ($parts.Count -ge 3) { [int]$parts[2] + 1 } else { 1 }
+        $newName = "$major.$minor.$patch"
+    } else {
+        # A minor bump drops any patch component: 1.2.3 -> 1.3, not 1.3.3.
+        $newName = "$major.$([int]$parts[1] + 1)"
+    }
+    $newCode = $VersionCode + 1
+
+    # Rewrite only the two assignment lines, so the comments above them survive.
+    $lines = Get-Content $VersionFile
+    $out = foreach ($line in $lines) {
+        if ($line -match '^\s*versionCode\s*=') { "versionCode=$newCode" }
+        elseif ($line -match '^\s*versionName\s*=') { "versionName=$newName" }
+        else { $line }
+    }
+    # -Encoding utf8 without a BOM: a BOM would end up inside the first key's name when the file
+    # is parsed by anything less forgiving than PowerShell.
+    [System.IO.File]::WriteAllLines($VersionFile, $out, (New-Object System.Text.UTF8Encoding($false)))
+    Ok "bumped $VersionName ($VersionCode) -> $newName ($newCode)"
+    $VersionName = $newName
+    $VersionCode = $newCode
+}
+
+Ok "version $VersionName  (versionCode $VersionCode)"
+
+# Warn - do not fail - when the sources changed without a bump. The version is a promise about
+# what is inside, and a build that silently reuses the previous number breaks that promise for
+# anyone comparing two APKs. It is a warning because a rebuild after a failed build, or a build
+# with no source change at all, is perfectly legitimate.
+$StampFile = Join-Path $OutDir ".version-stamp"
+$sourceFiles = @(Get-ChildItem -Path (Join-Path $AppDir "src"), (Join-Path $AppDir "res") -Recurse -File -ErrorAction SilentlyContinue)
+$sourceFiles += Get-Item $Manifest, (Join-Path $AppDir "make-icons.py") -ErrorAction SilentlyContinue
+$fingerprint = ($sourceFiles | Sort-Object FullName | ForEach-Object {
+    "$($_.FullName):$($_.Length):$($_.LastWriteTimeUtc.Ticks)"
+}) -join "`n"
+$sha = [System.Security.Cryptography.SHA256]::Create()
+$fingerprintHash = [BitConverter]::ToString(
+    $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($fingerprint))).Replace("-", "").Substring(0, 16)
+$sha.Dispose()
+
+if (Test-Path $StampFile) {
+    $stamp = (Get-Content $StampFile -Raw).Trim() -split "`n"
+    if ($stamp.Count -ge 2 -and $stamp[0] -ne $fingerprintHash -and $stamp[1] -eq "$VersionName") {
+        Warn "the app's sources changed but the version is still $VersionName"
+        Warn "  bumping is what tells anyone comparing two APKs that they differ"
+        Warn "  re-run with -Bump (or -Bump -Fix) to make it $VersionName + 1"
+    }
+    if ($stamp.Count -ge 2 -and $stamp[1] -ne "$VersionName") {
+        Info "version changed since the last build: $($stamp[1]) -> $VersionName"
+    }
+}
+if (-not (Test-Path $OutDir)) { New-Item -ItemType Directory -Path $OutDir -Force | Out-Null }
+"$fingerprintHash`n$VersionName" | Out-File -FilePath $StampFile -Encoding ascii -NoNewline
+
 # --------------------------------------------------------------------------- link
 
 Step "Linking (aapt2 link)"
 # --min-sdk-version / --target-sdk-version are passed explicitly: without them aapt2 uses the
 # oldest it supports, which makes Android apply legacy behaviour to a modern app.
+#
+# The version is `aapt2`'s business, not the manifest's: AndroidManifest.xml deliberately carries
+# no versionCode or versionName, so there is exactly one place the number lives and no chance of
+# the manifest and version.properties disagreeing.
 & $Aapt2 link `
     -o $UnsignedApk `
     -I $AndroidJar `
     --manifest $Manifest `
     --min-sdk-version 24 `
     --target-sdk-version 34 `
-    --version-code 1 `
-    --version-name "1.0" `
+    --version-code $VersionCode `
+    --version-name $VersionName `
     $CompiledRes
 if ($LASTEXITCODE -ne 0) { Bad "aapt2 link failed with $LASTEXITCODE"; exit 1 }
 Ok "linked: $(Split-Path $UnsignedApk -Leaf)"
