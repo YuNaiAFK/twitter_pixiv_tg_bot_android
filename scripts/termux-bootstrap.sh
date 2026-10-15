@@ -7,17 +7,28 @@
 # keyed on the SELinux domain. Termux's own process runs as
 # `u:r:untrusted_app_27:s0:c209,...` and has it; a process started with `su 10209` from adb
 # lands in `u:r:magisk:s0` and does not - measured, every connection from it fails with
-# `socket: Permission denied`, including a bare `ping 8.8.8.8`, while uid 0 succeeds.
+# `socket: Permission denied`, while uid 0 succeeds.
 #
-# **The phone's own proxy is used when one is running**, because a working VPN is strictly
-# better than any mirror: it makes GitHub, pip and the TDLib source all reachable, not just the
-# package index. Mirror switching is a fallback for when there is no proxy, not the default.
+# Three failures shaped this script, all found on this device and all fixed by measurement:
+#
+#   1. `pkg upgrade`    hung the whole install. dpkg asks about configuration-file conflicts
+#                       even under DEBIAN_FRONTEND=noninteractive, and with no terminal it
+#                       waits forever. It is not needed: `pkg install` resolves dependencies.
+#   2. `dpkg --configure -a` with output thrown away looked like a hang for the same reason:
+#                       the OpenSSL conffile prompt was waiting on a keyboard that never
+#                       answered, invisibly. Fixed by `</dev/null` plus --force-confold.
+#   3. mirror switching  was the wrong default for a phone that already has a VPN. The proxy is
+#                       tried first and mirror changes only happen without one.
+#
+# Every command that can prompt does so with stdin from /dev/null, so a question can never
+# block: it reads EOF and takes its default.
 
 set -u
 
 REPO_URL="${REPO_URL:-https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android.git}"
 CLONE_DIR="${CLONE_DIR:-$HOME/twitter_pixiv_tg_bot}"
 WITH_SERVER=1
+NO_MIRROR=0
 
 for arg in "$@"; do
     case "$arg" in
@@ -26,7 +37,6 @@ for arg in "$@"; do
         --repo=*)    REPO_URL="${arg#--repo=}" ;;
     esac
 done
-NO_MIRROR="${NO_MIRROR:-0}"
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
@@ -34,11 +44,17 @@ info() { printf '    \033[36m·\033[0m %s\n' "$1"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$1"; }
 die()  { printf '    \033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 
+# Never let a prompt block: EOF makes dpkg take its default instead of waiting.
+export DEBIAN_FRONTEND=noninteractive
+DPKG_OPTS="--force-confold --force-confdef"
+APT_OPTS="-o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef -o Dpkg::Use-Pty=0"
+
 # -------------------- proxy first --------------------
 
 say "Proxy"
-# v2rayNG defaults to SOCKS5 on 10808 and HTTP on 10809; other clients use 7890/7891. Both
-# protocols are tried per port, because the wrong guess looks exactly like a dead proxy.
+# A working VPN is strictly better than any mirror: it reaches GitHub, pip and the TDLib source
+# as well as the package index. Measured on this phone: v2rayNG on 10808 answers 200 as both
+# SOCKS5 and HTTP.
 PROXY_URL=""
 OPEN_PORTS=""
 for port in 10808 10809 7890 7891 1080 8118 8889; do
@@ -62,6 +78,7 @@ if [ -n "$OPEN_PORTS" ]; then
             esac
         done
     done
+    [ -n "$PROXY_URL" ] || warn "a port is open but nothing got through it"
 else
     info "no local proxy port is listening"
 fi
@@ -70,8 +87,7 @@ if [ -z "$PROXY_URL" ]; then
     if curl -fsS --max-time 12 -o /dev/null https://github.com/ 2>/dev/null; then
         ok "no proxy needed - github.com is directly reachable"
     else
-        warn "no proxy and no direct route to github.com"
-        warn "switching on the VPN and re-running is the reliable fix"
+        warn "no proxy and no direct route; switching the VPN on and re-running is the fix"
     fi
 fi
 
@@ -79,57 +95,48 @@ if [ -n "$PROXY_URL" ]; then
     export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL" all_proxy="$PROXY_URL"
     export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL" ALL_PROXY="$PROXY_URL"
     printf '%s\n' "$PROXY_URL" > "$HOME/.proxy-url"
-    ok "exported for this run, and saved to ~/.proxy-url"
-
-    # apt does not read the *_proxy variables for its own transport; it needs the config file.
+    # apt ignores the *_proxy variables for its own transport; only the config file works.
     mkdir -p "$PREFIX/etc/apt/apt.conf.d"
-    cat > "$PREFIX/etc/apt/apt.conf.d/95proxy" <<EOF
-Acquire::http::Proxy "$PROXY_URL";
-Acquire::https::Proxy "$PROXY_URL";
-EOF
-    ok "apt configured to use it"
-
-    # git needs its own setting, and only for https - a global http.proxy would break the
-    # local repositories the user already has.
-    git config --global http.https://github.com/.proxy "$PROXY_URL" 2>/dev/null && \
-        ok "git configured for github.com only"
-    # pip honours the environment variables above, so nothing else is needed for it.
+    {
+        printf 'Acquire::http::Proxy "%s";\n' "$PROXY_URL"
+        printf 'Acquire::https::Proxy "%s";\n' "$PROXY_URL"
+    } > "$PREFIX/etc/apt/apt.conf.d/95proxy"
+    # git needs its own setting, and only for github.com: a global http.proxy would break the
+    # user's other repositories.
+    git config --global http.https://github.com/.proxy "$PROXY_URL" 2>/dev/null || true
+    ok "exported, saved to ~/.proxy-url, and given to apt and git"
 fi
 
-# -------------------- mirror (fallback only) --------------------
+# -------------------- mirror (only without a proxy) --------------------
 
+say "Package mirror"
 if [ -n "$PROXY_URL" ] || [ "$NO_MIRROR" = "1" ]; then
-    say "Package mirror"
     if [ -n "$PROXY_URL" ]; then
         ok "left alone - the proxy reaches the default mirror"
     else
         ok "left alone (--no-mirror)"
     fi
 else
-    say "Package mirror (no proxy, so a reachable one is needed)"
-    # The default is mirror.mephi.ru, in Russia, which does not answer from mainland China;
-    # `pkg` then fails with "None of the mirrors are accessible".
+    # The default is mirror.mephi.ru, in Russia, which does not answer from mainland China.
     CHOSEN=""
     for m in \
         "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main" \
         "https://mirrors.ustc.edu.cn/termux/apt/termux-main" \
         "https://mirror.nju.edu.cn/termux/apt/termux-main" \
         "https://packages.termux.dev/apt/termux-main" ; do
-        info "trying $m"
         if curl -fsS --max-time 15 -o /dev/null "$m/dists/stable/Release" 2>/dev/null; then
-            CHOSEN="$m"
-            ok "reachable: $m"
-            break
+            CHOSEN="$m"; ok "using $m"; break
         fi
     done
     if [ -z "$CHOSEN" ]; then
-        warn "none answered - leaving the configuration alone"
+        warn "no mirror answered - leaving the configuration alone"
     else
         mkdir -p "$PREFIX/etc/apt/sources.list.d"
         printf 'deb %s stable main\n' "$CHOSEN" > "$PREFIX/etc/apt/sources.list.d/termux-main.list"
-        [ -f "$PREFIX/etc/apt/sources.list" ] && \
-            grep -v '^deb ' "$PREFIX/etc/apt/sources.list" > "$PREFIX/etc/apt/sources.list.tmp" 2>/dev/null && \
-            mv "$PREFIX/etc/apt/sources.list.tmp" "$PREFIX/etc/apt/sources.list"
+        if [ -f "$PREFIX/etc/apt/sources.list" ]; then
+            grep -v '^deb ' "$PREFIX/etc/apt/sources.list" > "$PREFIX/etc/apt/sources.list.tmp" 2>/dev/null || true
+            mv "$PREFIX/etc/apt/sources.list.tmp" "$PREFIX/etc/apt/sources.list" 2>/dev/null || true
+        fi
         ok "mirror configured"
     fi
 fi
@@ -137,31 +144,42 @@ fi
 # -------------------- packages --------------------
 
 say "Packages"
-export DEBIAN_FRONTEND=noninteractive
-# **`pkg upgrade` is deliberately NOT run.** It hung the first install: this device had 74
-# packages to upgrade, and dpkg asks about configuration-file conflicts even under
-# DEBIAN_FRONTEND=noninteractive - with no terminal to answer it waits forever at
-# "Building dependency tree...". Measured: six minutes, prefix stuck at 81 MB, no .deb cached.
-# It is also unnecessary, since `pkg install` resolves what it needs.
-DPKG_OPTS="-o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef -o Dpkg::Use-Pty=0"
 
-if [ -e "$PREFIX/var/lib/dpkg/lock" ] || [ -e "$PREFIX/var/lib/dpkg/lock-frontend" ]; then
-    info "clearing stale dpkg locks from an interrupted run"
-    rm -f "$PREFIX/var/lib/dpkg/lock" "$PREFIX/var/lib/dpkg/lock-frontend" \
-          "$PREFIX/var/lib/apt/lists/lock" "$PREFIX/var/cache/apt/archives/lock" 2>/dev/null || true
-fi
+# Clear locks left by an interrupted run; a held lock makes the next apt refuse to start.
+for f in "$PREFIX/var/lib/dpkg/lock" "$PREFIX/var/lib/dpkg/lock-frontend" \
+         "$PREFIX/var/lib/apt/lists/lock" "$PREFIX/var/cache/apt/archives/lock"; do
+    [ -e "$f" ] && rm -f "$f" 2>/dev/null && info "cleared $(basename "$f")"
+done
+
+# Finish anything half-configured. **stdin from /dev/null is the fix**, not the flags alone:
+# without it dpkg stops at the OpenSSL conffile prompt and waits for a keyboard that is not
+# there. Measured on this device: exit 0 in seconds with it, an indefinite hang without.
 info "finishing any half-configured packages"
-dpkg --configure -a >/dev/null 2>&1 || true
+if ! dpkg $DPKG_OPTS --configure -a </dev/null 2>&1 | tail -n 5; then
+    warn "dpkg --configure reported a problem; continuing anyway"
+fi
 
-pkg update -y 2>&1 | tail -n 5
+info "updating the package index"
+if ! apt-get update $APT_OPTS </dev/null 2>&1 | tail -n 4; then
+    warn "apt-get update failed; the install below may not resolve"
+fi
+
+info "installing python, git and the Pillow build dependencies"
 # shellcheck disable=SC2086
-pkg install -y $DPKG_OPTS python git clang make libjpeg-turbo libpng freetype openssl libffi proot-distro 2>&1 | tail -n 15
-command -v python >/dev/null || die "python did not install"
+if ! apt-get install -y $APT_OPTS </dev/null \
+        python git clang make libjpeg-turbo libpng freetype openssl libffi proot-distro \
+        2>&1 | tail -n 20; then
+    warn "apt-get install reported a problem"
+fi
+
+if ! command -v python >/dev/null; then
+    die "python is still missing. Check the output above for the reason."
+fi
 ok "python $(python --version 2>&1 | awk '{print $2}')"
 
 say "Python packages"
-python -m pip install --upgrade pip 2>&1 | tail -n 2
-python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv 2>&1 | tail -n 6
+python -m pip install --upgrade pip </dev/null 2>&1 | tail -n 2
+python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv </dev/null 2>&1 | tail -n 6
 ok "installed"
 
 # -------------------- project --------------------
@@ -169,10 +187,9 @@ ok "installed"
 say "Project"
 if [ -d "$CLONE_DIR/.git" ]; then
     info "already cloned; updating"
-    git -C "$CLONE_DIR" pull --ff-only 2>&1 | tail -n 3
+    git -C "$CLONE_DIR" pull --ff-only </dev/null 2>&1 | tail -n 3
 else
-    # --depth 1 keeps it small over a phone connection.
-    git clone --depth 1 "$REPO_URL" "$CLONE_DIR" || die "git clone failed"
+    git clone --depth 1 "$REPO_URL" "$CLONE_DIR" </dev/null || die "git clone failed"
 fi
 cd "$CLONE_DIR" || die "cannot enter $CLONE_DIR"
 ok "at $CLONE_DIR"
@@ -224,7 +241,7 @@ cat <<'NEXT'
 
         bash ~/twitter_pixiv_tg_bot/scripts/run-bot.sh
 
-    If you set a proxy above, keep it for future sessions by adding to ~/.bashrc:
+    To keep the proxy in future sessions, add to ~/.bashrc:
 
         export http_proxy=$(cat ~/.proxy-url)
         export https_proxy=$http_proxy

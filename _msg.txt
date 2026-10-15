@@ -1,17 +1,27 @@
-Use the phone's own proxy instead of switching mirrors
+Fix the dpkg prompt that hung every install attempt
 
-A working VPN is strictly better than any mirror: it makes GitHub, pip and the TDLib source
-reachable, not just the package index. The bootstrap now probes 127.0.0.1 for v2rayNG's usual
-ports (10808 SOCKS5 / 10809 HTTP, plus 7890/7891) and tries BOTH protocols on each, because
-guessing the wrong one looks exactly like a dead proxy.
+The root cause of four failed installs, found by screenshotting the phone: dpkg stops at the
+OpenSSL configuration-file conflict and waits for a keyboard that is not there.
 
-When a proxy is found it is exported for the run, written to ~/.proxy-url, given to apt through
-apt.conf.d (apt ignores the *_proxy environment variables for its own transport), and set for
-github.com only in git - a global http.proxy would break the user's other repositories.
+    Setting up openssl (1:3.6.5) ...
+    Configuration file '/data/data/com.termux/files/usr/etc/tls/openssl.cnf'
+    *** openssl.cnf (Y/I/N/O/D/Z) [default=N] ?
 
-Mirror switching is now a fallback that runs ONLY when there is no proxy, and can be forced off
-with --no-mirror. Switching was the wrong default for a phone that already has a VPN.
+DEBIAN_FRONTEND=noninteractive does NOT suppress that prompt, and the previous version threw
+the output away with >/dev/null 2>&1, so it looked like a hang rather than a question.
+Verified on the device: with the same flags plus </dev/null, 'dpkg --configure -a' exits 0 in
+seconds. Reading EOF is what makes dpkg take its default; the flags alone do not.
 
-Added scripts/find-proxy.sh to test this on its own and print the exact export lines, since a
-proxy that accepts a connection but carries nothing is worse than none: every tool then hangs
-instead of saying so, which is what happened with apt earlier.
+Every command that can prompt now reads stdin from /dev/null - dpkg, apt-get update,
+apt-get install, pip, git clone and git pull. A question can no longer block anything.
+
+Also corrected two of my own misdiagnoses:
+
+  - 'dpkg -l | grep -c ^i[^i]' reported zero packages installed, which looked like a broken
+    database. It is the wrong format: dpkg's status file uses the multi-line
+    'Status: install ok installed'. The device actually had 75 packages, all correctly
+    configured.
+  - 'dpkg --configure -a' was never slow. It was waiting on the prompt.
+
+The proxy is now detected and used first, since it measured 200 as both SOCKS5 and HTTP on
+10808, and mirror switching only happens when there is no proxy.
