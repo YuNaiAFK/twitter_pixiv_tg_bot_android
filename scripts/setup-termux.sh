@@ -27,7 +27,24 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PREFIX_TERMUX="${PREFIX:-/data/data/com.termux/files/usr}"
 CHROOT_NAME="${CHROOT_NAME:-botapi}"
-CHROOT_ROOT="${CHROOT_ROOT:-$PREFIX_TERMUX/var/lib/proot-distro/installed-rootfs/$CHROOT_NAME}"
+PROOT_BASE="${PROOT_BASE:-$PREFIX_TERMUX/var/lib/proot-distro}"
+
+# **proot-distro 5.x moved the rootfs, and checking only the old path makes the script try to
+# reinstall a container that already exists:**
+#
+#     Error: container 'botapi' already exists. Specify a different name with '--name NAME'.
+#
+#   5.x   $PROOT_BASE/containers/<name>/rootfs
+#   4.x   $PROOT_BASE/installed-rootfs/<name>
+#
+# The measured layout on this device is the 5.x one: containers/botapi/rootfs, 658 MB, with
+# manifest.json beside it. Both are checked so the script works either way, and PROOT_BASE can be
+# overridden if a future version moves it again.
+if [ -d "$PROOT_BASE/containers/$CHROOT_NAME/rootfs" ]; then
+    CHROOT_ROOT="$PROOT_BASE/containers/$CHROOT_NAME/rootfs"
+else
+    CHROOT_ROOT="${CHROOT_ROOT:-$PROOT_BASE/installed-rootfs/$CHROOT_NAME}"
+fi
 API_PORT="${API_PORT:-8081}"
 BUILD_SERVER=1
 CHECK_ONLY=0
@@ -201,10 +218,21 @@ else
         fi
         have proot-distro || die "proot-distro is missing; pkg install proot-distro"
 
-        if [ -d "$CHROOT_ROOT" ]; then
-            skip "chroot '$CHROOT_NAME' already installed"
+        # Ask proot-distro itself whether the container exists, rather than inferring it from a
+        # path. A path test is what broke here: 5.x keeps the rootfs at
+        # containers/<name>/rootfs while the script looked at installed-rootfs/<name>, so it
+        # decided to install again and was told "container 'botapi' already exists".
+        #
+        # `list` is the authoritative answer and is version-independent.
+        if proot-distro list 2>/dev/null | grep -qE "^[[:space:]]*\*?[[:space:]]*$CHROOT_NAME[[:space:]]*$"; then
+            skip "container '$CHROOT_NAME' already installed"
+        elif [ -d "$CHROOT_ROOT" ]; then
+            skip "chroot '$CHROOT_NAME' already present at $CHROOT_ROOT"
         else
-            run proot-distro install --name "$CHROOT_NAME" debian
+            # The name is an option, not a positional argument in 5.x:
+            #   proot-distro install [OPTIONS] (IMAGE:TAG or URL or FILE)
+            # `--name=...` is used so the value cannot be mistaken for the image reference.
+            run proot-distro install --name="$CHROOT_NAME" debian:stable
             ok "Debian chroot installed"
         fi
 

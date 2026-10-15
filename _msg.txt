@@ -1,26 +1,27 @@
-Initialise the td submodule, without which CMake cannot configure
+Detect the container with proot-distro itself, and fix its install syntax
 
-The first chroot build reached CMake and failed with:
+Re-running the build failed with:
 
-    CMake Error at CMakeLists.txt:22 (prevent_in_source_build):
-      Unknown CMake command "prevent_in_source_build".
+    Error: container 'botapi' already exists. Specify a different name with '--name NAME'.
 
-That message points at the wrong thing. The top-level CMakeLists.txt does:
+The container was fine; the script could not see it. proot-distro 5.x keeps the rootfs at
 
-    add_subdirectory(td EXCLUDE_FROM_ALL)                          # line 5
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/td/CMake")  # line 10
-    include(PreventInSourceBuild)                                  # line 21
-    prevent_in_source_build()                                      # line 22
+    $PROOT_BASE/containers/<name>/rootfs
 
-`td` is a git submodule. `git clone --depth 1` does not fetch submodules, and `--recursive` is
-not implied by `--depth 1`, so td/ was empty and td/CMake/PreventInSourceBuild.cmake did not
-exist. `include()` of a missing module is not fatal in CMake, so the configure carried on and
-the failure surfaced one line later as an unknown command - which reads like a broken upstream
-CMakeLists or a missing CMake package, and is neither.
+while the script only looked at the 4.x location,
 
-Added `git submodule update --init --recursive` after the clone, plus an explicit check that
-td/CMake/PreventInSourceBuild.cmake exists afterwards, so if the submodule fetch itself fails
-the error names that instead of blaming CMake.
+    $PROOT_BASE/installed-rootfs/<name>
 
-The Debian rootfs install before this step worked: 706 MB of aarch64 rootfs with g++, git and
-perl in place, so only the source checkout was wrong.
+So the -d test failed, the script decided to install again, and proot-distro refused because the
+container it was about to create already existed. Measured on the device: 658 MB under
+containers/botapi/rootfs, with manifest.json beside it, and `proot-distro list` naming botapi.
+
+Three changes:
+
+  - both layouts are checked, so either version works, and PROOT_BASE can be overridden if a
+    later release moves it again
+  - the decision now asks `proot-distro list` first, which is authoritative and does not depend
+    on any path; the path test remains only as a fallback
+  - `install --name=NAME debian:stable` - 5.x documents the name as an option and the argument
+    slot as the image reference: `install [OPTIONS] (IMAGE:TAG or URL or FILE)`. The tag is
+    explicit so a future `latest` cannot silently change the base.
