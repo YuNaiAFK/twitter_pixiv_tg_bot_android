@@ -107,20 +107,32 @@ if [ -n "$PROXY_URL" ]; then
     # apt, curl and git all speak SOCKS, so they get the best form available.
     export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL" all_proxy="$PROXY_URL"
     export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL" ALL_PROXY="$PROXY_URL"
-    printf '%s\n' "$PROXY_URL" > "$HOME/.proxy-url"
-    if [ -n "$HTTP_URL" ]; then
-        printf '%s\n' "$HTTP_URL" > "$HOME/.proxy-url-http"
-    fi
-    # apt ignores the *_proxy variables for its own transport; only the config file works.
+    # **The HTTP form is what gets written to disk and to the config files.**
+    #
+    # apt rejects a SOCKS proxy outright -
+    #
+    #     Unsupported proxy configured: socks5://127.0.0.1:10808
+    #     E: The repository '...' does not have a Release file.
+    #
+    # - and worse, the message names the REPOSITORY, so it reads as a broken mirror. Measured
+    # on this phone: every Termux mirror served its Release file fine from the PC, while apt
+    # failed on all of them because the proxy in apt.conf.d could not be used. pip has the same
+    # limitation for a different reason (it needs PySocks). Both work with `http://`, which
+    # v2rayNG also answers on this port.
+    SAVED_URL="${HTTP_URL:-$PROXY_URL}"
+    printf '%s\n' "$SAVED_URL" > "$HOME/.proxy-url"
+    [ -n "$SOCKS_URL" ] && printf '%s\n' "$SOCKS_URL" > "$HOME/.proxy-url-socks"
+    # apt ignores the *_proxy variables for its own transport; only the config file works, and
+    # it must be a form apt understands.
     mkdir -p "$PREFIX/etc/apt/apt.conf.d"
     {
-        printf 'Acquire::http::Proxy "%s";\n' "$PROXY_URL"
-        printf 'Acquire::https::Proxy "%s";\n' "$PROXY_URL"
+        printf 'Acquire::http::Proxy "%s";\n' "$SAVED_URL"
+        printf 'Acquire::https::Proxy "%s";\n' "$SAVED_URL"
     } > "$PREFIX/etc/apt/apt.conf.d/95proxy"
     # git needs its own setting, and only for github.com: a global http.proxy would break the
     # user's other repositories.
-    git config --global http.https://github.com/.proxy "$PROXY_URL" 2>/dev/null || true
-    ok "exported, saved, and given to apt and git"
+    git config --global http.https://github.com/.proxy "$SAVED_URL" 2>/dev/null || true
+    ok "saved for later sessions, and given to apt and git as $SAVED_URL"
 fi
 
 # -------------------- mirror (only without a proxy) --------------------
@@ -301,4 +313,7 @@ cat <<'NEXT'
         export http_proxy=$(cat ~/.proxy-url)
         export https_proxy=$http_proxy
         export all_proxy=$http_proxy
+
+    ~/.proxy-url holds the HTTP form, because apt and pip cannot use SOCKS. The SOCKS form,
+    if the proxy offered one, is in ~/.proxy-url-socks for tools that prefer it.
 NEXT

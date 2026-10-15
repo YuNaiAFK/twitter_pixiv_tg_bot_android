@@ -1,27 +1,29 @@
-Fix cookie paths on Android, and the SOCKS proxy that broke pip
+Use the HTTP proxy form for apt and pip, which cannot speak SOCKS
 
-Two failures from the first successful start on the phone.
+    $ apt-get update
+    Unsupported proxy configured: socks5://127.0.0.1:10808
+    E: The repository 'https://packages-cf.termux.dev/apt/termux-main stable Release'
+       does not have a Release file.
 
-1. Cookie paths resolved from the wrong directory, silently. BASE_DIR is bot.py's own
-   directory, so a relative cookies/twitter.txt became
-   .../twitter_pixiv_tg_bot/bot/cookies/twitter.txt - while the installer and the README put
-   the cookies beside .env at the project root. The bot logged "Cookie 檔不存在，已略過",
-   reported X/Twitter 未設定 and e-hentai 未設定（只能讀取公開畫廊）, and carried on. That is
-   the worst shape of bug: a bot that looks like it works with two of its three features
-   quietly disabled.
+The message names the REPOSITORY, so this reads as a broken mirror. I chased that: every Termux
+mirror serves its Release file correctly - all five answering 200 with identical 13134-byte
+content from a PC on the same network - while apt failed on every one of them. The SOCKS line
+above the error is the only real clue.
 
-   resolve_relative_path() now checks the project root before BASE_DIR, and both
-   resolve_cookie_file() and resolve_ehentai_cookies() use it. Verified against a simulated
-   layout containing a file in each place; the Windows tree is unaffected because its cookies/
-   is also at the project root.
+pip has the same limitation for a different reason and says so differently:
 
-2. pip cannot use a SOCKS proxy. http_proxy=socks5://... made every install fail with
-   "Could not install packages due to an OSError: Missing dependencies for SOCKS support" -
-   pip needs PySocks, and installing PySocks needs pip. Measured: v2rayNG's port answers both
-   protocols, so the bootstrap now records the SOCKS form for apt/curl/git and the HTTP form
-   for pip, falling back to a direct connection when there is no HTTP listener.
+    ERROR: Could not install packages due to an OSError: Missing dependencies for SOCKS support.
 
-Also replaced the install check. It piped pip through 	ail and tested the pipeline's exit
-status, which is tail's and always 0, so a complete failure was reported as success - the
-packages were in fact never installed, and only the bot failing to start revealed it. The check
-now imports all five modules and fails loudly.
+It needs PySocks to speak SOCKS, and installing PySocks needs pip. Neither tool hints that the
+HTTP form is the answer.
+
+Three places held the SOCKS value and only the third mattered:
+
+  .bashrc              read from ~/.proxy-url, so it was only a carrier
+  ~/.proxy-url         already HTTP by the time this was found
+  apt.conf.d/95proxy   **the actual cause** - apt reads this file for its own transport and it
+                       outranks the environment, so a terminal-only fix changed nothing
+
+The bootstrap now writes the HTTP form to apt.conf.d, to ~/.proxy-url and to git; the SOCKS form
+goes to ~/.proxy-url-socks for tools that prefer it. SAVED_URL is \, so
+a SOCKS URL can no longer reach apt at all.

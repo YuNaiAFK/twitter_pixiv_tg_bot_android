@@ -155,3 +155,50 @@ A bare `host:port` is accepted and treated as SOCKS5.
   Termux:API app from F-Droid.
 - **The test suite runs on a desktop, not on the phone.** It needs `pytest`-free plain Python
   and takes minutes; on a phone it is easier to run it before copying changes across.
+
+
+## The proxy form matters more than it looks
+
+`apt` and `pip` **cannot use a SOCKS proxy**, and both report it in a way that blames something
+else:
+
+    $ apt-get update
+    Unsupported proxy configured: socks5://127.0.0.1:10808
+    E: The repository 'https://packages-cf.termux.dev/apt/termux-main stable Release'
+       does not have a Release file.
+
+That message names the **repository**, so it reads as a broken or unreachable mirror. Every
+Termux mirror was in fact serving its Release file correctly - verified from a PC on the same
+network, all five answering `200` with identical 13134-byte content - while `apt` failed on all
+of them. The SOCKS line is the only real clue, and it appears **above** the error.
+
+`pip` says it differently:
+
+    ERROR: Could not install packages due to an OSError: Missing dependencies for SOCKS support.
+
+pip needs PySocks to speak SOCKS, and installing PySocks needs pip. Neither message says "use
+the HTTP form", which is the fix for both.
+
+### What the bootstrap does now
+
+| file | form | why |
+| --- | --- | --- |
+| `~/.proxy-url` | **HTTP** | what `apt` and `pip` need, and what `~/.bashrc` reads |
+| `~/.proxy-url-socks` | SOCKS, if offered | for tools that prefer it |
+| `apt.conf.d/95proxy` | **HTTP** | apt reads this file, not the environment, for its own transport |
+| `http_proxy` / `all_proxy` in the shell | HTTP | so every child gets a usable form |
+
+**`apt.conf.d/95proxy` outranks the environment variables**, so leaving a SOCKS value there
+keeps breaking apt no matter what `.bashrc` says. That is exactly what happened here: changing
+`.bashrc` and `~/.proxy-url` to HTTP changed nothing, because the file still held the old
+value from the first run.
+
+### If apt ever reports a missing Release file
+
+Check the proxy before the mirror:
+
+    cat $PREFIX/etc/apt/apt.conf.d/95proxy
+    cat ~/.proxy-url
+
+Both must say `http://`. A terminal-only fix is overwritten on the next run; the file is what
+matters.
