@@ -457,7 +457,7 @@ reachable either way - the app is a convenience, not a replacement.
 
 ## Download the APKs
 
-Everything needed is attached to the [v1.0 release](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.0):
+Everything needed is attached to the [latest release](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/latest):
 
 | file | size | what it is |
 | --- | --- | --- |
@@ -474,6 +474,9 @@ Everything needed is attached to the [v1.0 release](https://github.com/YuNaiAFK/
 **Termux itself is 108.6 MB**, which is over GitHub's 100 MB per-file limit for a repository file,
 so it lives in the release rather than in `apk/`. The three smaller ones are in both places; see
 [apk/README.md](apk/README.md).
+
+Each release keeps the `bot-panel.apk` from that version, so an older build can still be
+fetched if a newer one misbehaves. The three Termux APKs are identical in every release.
 
 Two things an installer cannot do, both required before the app can start anything:
 

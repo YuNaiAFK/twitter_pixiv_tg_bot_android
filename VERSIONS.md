@@ -33,16 +33,45 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 ## Releases
 
-| version | tag | what changed |
+| version | release | what changed |
 | --- | --- | --- |
-| **1.3** | - | the version itself: shown in the app's header, reported by the panel, and one number for everything. `VERSION.properties` becomes the only place it is written, and `build.ps1 -Bump` maintains it |
-| **1.2** | - | **全部關閉（含面板）** - stop the bot, the server and finally the panel. The panel answers before it exits, so the app sees success rather than a dropped connection |
-| **1.1** | [v1.0 released before this](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.0) | the start-services card, so the app can start everything over `RUN_COMMAND` without anyone opening Termux. The log follows its newest line instead of sitting wherever it was |
+| **1.3** | [v1.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.3) | the version itself: shown in the app's header, reported by the panel, one number for everything. `VERSION.properties` becomes the only place it is written and `build.ps1 -Bump` maintains it |
+| **1.2** | - | **全部關閉（含面板）** - stop the bot, the server and finally the panel. Answered before it exits, so the app sees success rather than a dropped connection |
+| **1.1** | - | the start-services card, so the app can start everything over `RUN_COMMAND` without anyone opening Termux. The log follows its newest line instead of sitting wherever it was |
 | **1.0** | [v1.0](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.0) | first release: status cards, bot and server control, live log, clear cache, `.env` editor |
 
-**The `v1.0` release tag predates this file.** Tags and the version in `VERSION.properties` are
-separate things: the tag marks a published download, the version says what is inside any build.
-From 1.3 on they are kept in step - a release is tagged `v<versionName>`.
+1.1 and 1.2 were never published as releases - they existed only as commits. Their changes are in
+v1.3.
+
+## Publishing a release
+
+**Create a new release. Never rename one.**
+
+Each release carries the `bot-panel.apk` built at that version, so an older build stays fetchable
+if a newer one misbehaves. The three Termux APKs are identical in every release and are re-uploaded
+only so that each release stands alone.
+
+    git tag -a v1.4 -m "..."
+    git push origin v1.4
+    # then POST /repos/{owner}/{repo}/releases with tag_name v1.4, and upload the assets
+
+**Renaming a release's tag moves the release and deletes the old tag's release page.** The API
+accepts `tag_name` on a PATCH and does exactly that, silently:
+
+    PATCH /releases/{id}  {"tag_name": "v1.3"}     # v1.0's release page is now gone
+
+That is how the v1.0 release was lost once. The tag itself survived - `refs/tags/v1.0` still
+pointed at the old commit - so the release could be rebuilt, and its app APK recovered from git
+history and verified by hash. It is why the build output is committed under `apk/` as well as
+attached to the release.
+
+Two more things about that API, both learned the hard way:
+
+  - **`target_commitish` returns 422 when the tag already exists.** The documentation says it is
+    ignored; in practice the request is rejected. Omit it once the tag is pushed, and pass it only
+    when the release should create the tag.
+  - **GitHub cannot replace an asset.** Updating one means DELETE, then POST the new file. The
+    download URL keeps working because it is keyed by the release and the asset name.
 
 ## Where the number is used
 

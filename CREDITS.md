@@ -23,7 +23,7 @@ install the companion apps. F-Droid also verifies signatures and delivers update
     https://f-droid.org/packages/com.termux.boot/
 
 Termux is **108.6 MB**, over GitHub's limit for a repository file, so it is attached to the
-[v1.0 release](../../releases/tag/v1.0) instead of living in `apk/`. The other two are in both
+[latest release](../../releases/latest) instead of living in `apk/`. The other two are in both
 places; see [apk/README.md](../apk/README.md).
 
 ## Termux packages
