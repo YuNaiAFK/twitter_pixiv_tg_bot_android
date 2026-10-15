@@ -166,12 +166,68 @@ else
             ok "Debian chroot installed"
         fi
 
+        # **The chroot has its own apt and its own git, and neither inherits Termux's proxy.**
+        #
+        # Termux's own `apt.conf.d/95proxy` is inside $PREFIX and means nothing to a Debian
+        # rootfs, while the build's first two steps are `apt-get update` and a `git clone` from
+        # github.com. Without this the build fails at once in mainland China - the same failure
+        # that made `pkg` report "does not have a Release file" earlier, and for the same reason:
+        # a proxy apt cannot use.
+        #
+        # Two properties matter:
+        #
+        #   the HTTP form    apt rejects a SOCKS proxy outright ("Unsupported proxy configured"),
+        #                    and git is happiest with the same shape
+        #   `--system` git   so the credentials are not attributed to a user that does not exist
+        #                    in the chroot
+        #
+        # The chroot shares Termux's /tmp via `--shared-tmp`, so the value is handed over in a
+        # file rather than by quoting it into three nested shells.
+        PROXY_FOR_CHROOT=$(cat "$HOME/.proxy-url" 2>/dev/null || true)
+        case "$PROXY_FOR_CHROOT" in
+            http://*|https://*) ;;
+            "") warn "no ~/.proxy-url; the chroot will try a direct connection" ;;
+            *)
+                # A SOCKS URL would be worse than none: apt refuses it AND reports the failure
+                # as a broken repository, which is the misleading message that cost hours.
+                warn "~/.proxy-url is not an http:// URL ($PROXY_FOR_CHROOT)"
+                warn "apt cannot use SOCKS - clearing it so the failure is honest"
+                PROXY_FOR_CHROOT=""
+                ;;
+        esac
+        if [ -n "$PROXY_FOR_CHROOT" ]; then
+            printf '%s\n' "$PROXY_FOR_CHROOT" > "$HOME/.proxy-for-chroot"
+            ok "passing the proxy to the chroot as $PROXY_FOR_CHROOT"
+        else
+            : > "$HOME/.proxy-for-chroot"
+        fi
         # One script, run inside the chroot. Written to a file rather than a long -c string
         # so a failure points at a readable line.
         cat > "$PROJECT_DIR/scripts/build-server-in-chroot.sh" <<'INNER'
 #!/bin/bash
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
+
+# Pick up the proxy that setup-termux.sh left in the shared /tmp, and configure apt to use it.
+# apt ignores the *_proxy environment variables for its own transport, so the config file is
+# not optional - the environment alone would still fail.
+if [ -r /tmp/.proxy-for-chroot ]; then
+    PROXY_URL=$(cat /tmp/.proxy-for-chroot)
+fi
+if [ -n "${PROXY_URL:-}" ]; then
+    echo "==> proxy: $PROXY_URL"
+    export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL" all_proxy="$PROXY_URL"
+    mkdir -p /etc/apt/apt.conf.d
+    {
+        printf 'Acquire::http::Proxy "%s";\n' "$PROXY_URL"
+        printf 'Acquire::https::Proxy "%s";\n' "$PROXY_URL"
+    } > /etc/apt/apt.conf.d/95proxy
+    git config --system http.proxy "$PROXY_URL" || true
+    git config --system https.proxy "$PROXY_URL" || true
+else
+    echo "==> no proxy configured; using a direct connection"
+fi
+
 echo "==> apt packages"
 apt-get update
 apt-get install -y --no-install-recommends \
@@ -189,6 +245,12 @@ echo "==> installed:"
 ls -l /usr/local/bin/telegram-bot-api
 INNER
         chmod +x "$PROJECT_DIR/scripts/build-server-in-chroot.sh"
+        # The proxy is handed over through Termux's own tmp directory, because `--shared-tmp`
+        # is what binds it to /tmp inside the chroot. Writing it to $HOME instead would leave
+        # the chroot without it: /tmp and $HOME are different directories, and only /tmp is
+        # shared.
+        mkdir -p "$PREFIX/tmp"
+        cp "$HOME/.proxy-for-chroot" "$PREFIX/tmp/.proxy-for-chroot" 2>/dev/null || true
         run proot-distro login "$CHROOT_NAME" --shared-tmp -- bash "/$PROJECT_DIR/scripts/build-server-in-chroot.sh" \
             || die "the build failed - the tail of the output above says which step"
 

@@ -1,26 +1,18 @@
-Report a user stop as a stop, not as an expired archive link
+Pass the proxy into the Debian chroot, which does not inherit Termux's
 
-Presses of stop during the official archive download were reported as
-"官方歸檔沒有任何分段下載成功（下載連結可能已過期，請重新取得）". The link was fine.
+The server build runs pt-get update and git clone github.com inside a proot Debian rootfs,
+and neither step had a proxy. A chroot has its own apt: Termux's apt.conf.d/95proxy lives inside
+$PREFIX and means nothing to a Debian rootfs. apt also ignores the *_proxy environment
+variables for its own transport, so exporting them in Termux was never going to be enough.
 
-Both conditions hold when a stop arrives before any bytes land: nothing has been written AND the
-stop flag is set. The written == 0 branch was tested first, so it won and produced a wrong
-diagnosis that sends the user to re-request an archive that was never broken. Measured on the
-phone: stopped 0.09 s into a 114.3 MiB download, and the log blamed an expired link.
+Without this the build fails immediately in mainland China, with the same misleading symptom as
+before - "does not have a Release file", naming a repository that is working fine.
 
-Fixed by testing the stop first when nothing was written:
+The HTTP form is required and is enforced: apt rejects SOCKS outright with "Unsupported proxy
+configured" and reports it as a broken repository. When ~/.proxy-url is not an http:// URL it is
+discarded with a warning, so a failure stays honest instead of looking like a network outage.
 
-    if stopped() and written == 0:
-        return written
-    if written == 0:
-        raise ...下載連結可能已過期...
-
-The written == 0 check still has to exist for the case it was written for - every range
-failing on its own, with no stop, which means the URL really is dead. Returning 0 there would
-let the caller send a 0-byte archive, which is why that branch was added originally.
-
-Two checks added, testing the decision order behaviourally rather than by matching text, so a
-future reordering is caught even if the comments change:
-
-  - a user stop is not reported as an expired link
-  - a genuine total failure still reports an expired link
+The value travels in Termux's own $PREFIX/tmp, because --shared-tmp is what binds that
+directory to /tmp inside the chroot - writing to ~/ or to / would leave the chroot without it.
+Inside the chroot the script writes /etc/apt/apt.conf.d/95proxy and sets git's proxy with
+--system, since there is no matching user in the rootfs.
