@@ -1,0 +1,17 @@
+Do not run 'pkg upgrade' in the Termux bootstrap, and never let dpkg prompt
+
+The first version ran 'pkg upgrade' and it hung the entire install. This device had 74 packages
+to upgrade, and dpkg asks about configuration-file conflicts even under
+DEBIAN_FRONTEND=noninteractive - with no terminal to answer it waits forever. Measured from
+the PC: six minutes with the prefix stuck at 81 MB, zero .deb files in the apt cache, and apt
+sleeping in do_select on an established but idle connection to the mirror. A screenshot of the
+phone showed it stopped at "Building dependency tree..." with a blinking cursor.
+
+'pkg upgrade' is also unnecessary: 'pkg install' resolves what it needs.
+
+Also added:
+
+  - dpkg --force-confold/--force-confdef/--use-pty, which suppress the prompts that
+    DEBIAN_FRONTEND does not
+  - lock cleanup and 'dpkg --configure -a' at the start, so a rerun after an interrupted
+    install recovers instead of refusing to proceed

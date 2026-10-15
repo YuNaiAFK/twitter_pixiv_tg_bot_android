@@ -74,10 +74,30 @@ fi
 
 say "Packages"
 export DEBIAN_FRONTEND=noninteractive
+# **`pkg upgrade` is deliberately NOT run.** It was in the first version and it hung the whole
+# install: this device had 74 packages to upgrade, and dpkg asks about configuration-file
+# conflicts even under DEBIAN_FRONTEND=noninteractive - with no terminal to answer, it waits
+# forever at "Building dependency tree...". Measured: six minutes with zero bytes downloaded
+# and no .deb in the cache.
+#
+# It is also unnecessary: `pkg install` resolves what it needs on its own.
+#
+# The dpkg options below suppress the prompts it would otherwise still ask.
+DPKG_OPTS="-o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef -o Dpkg::Use-Pty=0"
+
+# Recover from an interrupted run before starting a new one: a killed dpkg leaves packages half
+# configured and the next install refuses to proceed.
+if [ -e "$PREFIX/var/lib/dpkg/lock" ] || [ -e "$PREFIX/var/lib/dpkg/lock-frontend" ]; then
+    info "clearing stale dpkg locks from an interrupted run"
+    rm -f "$PREFIX/var/lib/dpkg/lock" "$PREFIX/var/lib/dpkg/lock-frontend" \
+          "$PREFIX/var/lib/apt/lists/lock" "$PREFIX/var/cache/apt/archives/lock" 2>/dev/null || true
+fi
+info "finishing any half-configured packages"
+dpkg --configure -a >/dev/null 2>&1 || true
+
 pkg update -y 2>&1 | tail -n 5
-# clang/make plus the image libraries are Pillow's build dependencies; without them pip
-# compiles from source and fails on missing headers instead of using a wheel.
-pkg install -y python git clang make libjpeg-turbo libpng freetype openssl libffi proot-distro 2>&1 | tail -n 12
+# shellcheck disable=SC2086
+pkg install -y $DPKG_OPTS python git clang make libjpeg-turbo libpng freetype openssl libffi proot-distro 2>&1 | tail -n 15
 command -v python >/dev/null || die "python did not install"
 ok "python $(python --version 2>&1 | awk '{print $2}')"
 
