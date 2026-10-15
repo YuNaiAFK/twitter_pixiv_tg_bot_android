@@ -1,17 +1,17 @@
-Do not run 'pkg upgrade' in the Termux bootstrap, and never let dpkg prompt
+Use the phone's own proxy instead of switching mirrors
 
-The first version ran 'pkg upgrade' and it hung the entire install. This device had 74 packages
-to upgrade, and dpkg asks about configuration-file conflicts even under
-DEBIAN_FRONTEND=noninteractive - with no terminal to answer it waits forever. Measured from
-the PC: six minutes with the prefix stuck at 81 MB, zero .deb files in the apt cache, and apt
-sleeping in do_select on an established but idle connection to the mirror. A screenshot of the
-phone showed it stopped at "Building dependency tree..." with a blinking cursor.
+A working VPN is strictly better than any mirror: it makes GitHub, pip and the TDLib source
+reachable, not just the package index. The bootstrap now probes 127.0.0.1 for v2rayNG's usual
+ports (10808 SOCKS5 / 10809 HTTP, plus 7890/7891) and tries BOTH protocols on each, because
+guessing the wrong one looks exactly like a dead proxy.
 
-'pkg upgrade' is also unnecessary: 'pkg install' resolves what it needs.
+When a proxy is found it is exported for the run, written to ~/.proxy-url, given to apt through
+apt.conf.d (apt ignores the *_proxy environment variables for its own transport), and set for
+github.com only in git - a global http.proxy would break the user's other repositories.
 
-Also added:
+Mirror switching is now a fallback that runs ONLY when there is no proxy, and can be forced off
+with --no-mirror. Switching was the wrong default for a phone that already has a VPN.
 
-  - dpkg --force-confold/--force-confdef/--use-pty, which suppress the prompts that
-    DEBIAN_FRONTEND does not
-  - lock cleanup and 'dpkg --configure -a' at the start, so a rerun after an interrupted
-    install recovers instead of refusing to proceed
+Added scripts/find-proxy.sh to test this on its own and print the exact export lines, since a
+proxy that accepts a connection but carries nothing is worse than none: every tool then hangs
+instead of saying so, which is what happened with apt earlier.

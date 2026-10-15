@@ -3,17 +3,15 @@
 #
 #   bash <(curl -fsSL https://raw.githubusercontent.com/YuNaiAFK/twitter_pixiv_tg_bot_android/main/scripts/termux-bootstrap.sh)
 #
-# Why it has to be run in the app and not pushed over adb: Android grants network access per
-# process, keyed on the SELinux domain. Termux's own process runs as
+# Why it must run in the app rather than over adb: Android grants network access per process,
+# keyed on the SELinux domain. Termux's own process runs as
 # `u:r:untrusted_app_27:s0:c209,...` and has it; a process started with `su 10209` from adb
-# lands in `u:r:magisk:s0` and does not - measured, `socket: Permission denied` for every
-# connection, including a bare `ping 8.8.8.8`. No amount of adb work changes that.
+# lands in `u:r:magisk:s0` and does not - measured, every connection from it fails with
+# `socket: Permission denied`, including a bare `ping 8.8.8.8`, while uid 0 succeeds.
 #
-# This script is written to survive the two things that actually go wrong here:
-#
-#   * the default Termux mirror is mirror.mephi.ru (Russia), unreachable from mainland China,
-#     which makes `pkg` fail with "None of the mirrors are accessible"
-#   * a long package download over a phone connection, which can drop mid-way
+# **The phone's own proxy is used when one is running**, because a working VPN is strictly
+# better than any mirror: it makes GitHub, pip and the TDLib source all reachable, not just the
+# package index. Mirror switching is a fallback for when there is no proxy, not the default.
 
 set -u
 
@@ -24,9 +22,11 @@ WITH_SERVER=1
 for arg in "$@"; do
     case "$arg" in
         --no-server) WITH_SERVER=0 ;;
+        --no-mirror) NO_MIRROR=1 ;;
         --repo=*)    REPO_URL="${arg#--repo=}" ;;
     esac
 done
+NO_MIRROR="${NO_MIRROR:-0}"
 
 say()  { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 ok()   { printf '    \033[32m✓\033[0m %s\n' "$1"; }
@@ -34,59 +34,117 @@ info() { printf '    \033[36m·\033[0m %s\n' "$1"; }
 warn() { printf '    \033[33m!\033[0m %s\n' "$1"; }
 die()  { printf '    \033[31m✗ %s\033[0m\n' "$1" >&2; exit 1; }
 
-# -------------------- mirror --------------------
+# -------------------- proxy first --------------------
 
-say "Package mirror"
-# Test the candidates and keep the first that answers. `pkg` picks a random mirror otherwise,
-# and on this network the default is unreachable.
-MIRRORS=(
-    "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main"
-    "https://mirrors.ustc.edu.cn/termux/apt/termux-main"
-    "https://mirror.nju.edu.cn/termux/apt/termux-main"
-    "https://packages.termux.dev/apt/termux-main"
-    "https://packages-cf.termux.dev/apt/termux-main"
-)
-CHOSEN=""
-for m in "${MIRRORS[@]}"; do
-    info "trying $m"
-    if curl -fsS --max-time 15 -o /dev/null "$m/dists/stable/Release" 2>/dev/null; then
-        CHOSEN="$m"
-        ok "reachable: $m"
-        break
+say "Proxy"
+# v2rayNG defaults to SOCKS5 on 10808 and HTTP on 10809; other clients use 7890/7891. Both
+# protocols are tried per port, because the wrong guess looks exactly like a dead proxy.
+PROXY_URL=""
+OPEN_PORTS=""
+for port in 10808 10809 7890 7891 1080 8118 8889; do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+        exec 3<&- 3>&- 2>/dev/null
+        OPEN_PORTS="$OPEN_PORTS $port"
     fi
 done
 
-if [ -z "$CHOSEN" ]; then
-    warn "no mirror answered - leaving the configuration alone"
-    warn "if pkg fails, set one by hand with: termux-change-repo"
+if [ -n "$OPEN_PORTS" ]; then
+    info "listening locally:$OPEN_PORTS"
+    for port in $OPEN_PORTS; do
+        for scheme in socks5 http; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                   -x "$scheme://127.0.0.1:$port" https://github.com/ 2>/dev/null || echo "000")
+            case "$code" in
+                200|301|302)
+                    PROXY_URL="$scheme://127.0.0.1:$port"
+                    ok "using $PROXY_URL (github.com -> HTTP $code)"
+                    break 2 ;;
+            esac
+        done
+    done
 else
-    mkdir -p "$PREFIX/etc/apt/sources.list.d"
-    printf 'deb %s stable main\n' "$CHOSEN" > "$PREFIX/etc/apt/sources.list.d/termux-main.list"
-    # Blank the default entry so the unreachable one is not used as a fallback.
-    if [ -f "$PREFIX/etc/apt/sources.list" ]; then
-        grep -v '^deb ' "$PREFIX/etc/apt/sources.list" > "$PREFIX/etc/apt/sources.list.tmp" 2>/dev/null || true
-        mv "$PREFIX/etc/apt/sources.list.tmp" "$PREFIX/etc/apt/sources.list"
+    info "no local proxy port is listening"
+fi
+
+if [ -z "$PROXY_URL" ]; then
+    if curl -fsS --max-time 12 -o /dev/null https://github.com/ 2>/dev/null; then
+        ok "no proxy needed - github.com is directly reachable"
+    else
+        warn "no proxy and no direct route to github.com"
+        warn "switching on the VPN and re-running is the reliable fix"
     fi
-    ok "mirror configured"
+fi
+
+if [ -n "$PROXY_URL" ]; then
+    export http_proxy="$PROXY_URL" https_proxy="$PROXY_URL" all_proxy="$PROXY_URL"
+    export HTTP_PROXY="$PROXY_URL" HTTPS_PROXY="$PROXY_URL" ALL_PROXY="$PROXY_URL"
+    printf '%s\n' "$PROXY_URL" > "$HOME/.proxy-url"
+    ok "exported for this run, and saved to ~/.proxy-url"
+
+    # apt does not read the *_proxy variables for its own transport; it needs the config file.
+    mkdir -p "$PREFIX/etc/apt/apt.conf.d"
+    cat > "$PREFIX/etc/apt/apt.conf.d/95proxy" <<EOF
+Acquire::http::Proxy "$PROXY_URL";
+Acquire::https::Proxy "$PROXY_URL";
+EOF
+    ok "apt configured to use it"
+
+    # git needs its own setting, and only for https - a global http.proxy would break the
+    # local repositories the user already has.
+    git config --global http.https://github.com/.proxy "$PROXY_URL" 2>/dev/null && \
+        ok "git configured for github.com only"
+    # pip honours the environment variables above, so nothing else is needed for it.
+fi
+
+# -------------------- mirror (fallback only) --------------------
+
+if [ -n "$PROXY_URL" ] || [ "$NO_MIRROR" = "1" ]; then
+    say "Package mirror"
+    if [ -n "$PROXY_URL" ]; then
+        ok "left alone - the proxy reaches the default mirror"
+    else
+        ok "left alone (--no-mirror)"
+    fi
+else
+    say "Package mirror (no proxy, so a reachable one is needed)"
+    # The default is mirror.mephi.ru, in Russia, which does not answer from mainland China;
+    # `pkg` then fails with "None of the mirrors are accessible".
+    CHOSEN=""
+    for m in \
+        "https://mirrors.tuna.tsinghua.edu.cn/termux/apt/termux-main" \
+        "https://mirrors.ustc.edu.cn/termux/apt/termux-main" \
+        "https://mirror.nju.edu.cn/termux/apt/termux-main" \
+        "https://packages.termux.dev/apt/termux-main" ; do
+        info "trying $m"
+        if curl -fsS --max-time 15 -o /dev/null "$m/dists/stable/Release" 2>/dev/null; then
+            CHOSEN="$m"
+            ok "reachable: $m"
+            break
+        fi
+    done
+    if [ -z "$CHOSEN" ]; then
+        warn "none answered - leaving the configuration alone"
+    else
+        mkdir -p "$PREFIX/etc/apt/sources.list.d"
+        printf 'deb %s stable main\n' "$CHOSEN" > "$PREFIX/etc/apt/sources.list.d/termux-main.list"
+        [ -f "$PREFIX/etc/apt/sources.list" ] && \
+            grep -v '^deb ' "$PREFIX/etc/apt/sources.list" > "$PREFIX/etc/apt/sources.list.tmp" 2>/dev/null && \
+            mv "$PREFIX/etc/apt/sources.list.tmp" "$PREFIX/etc/apt/sources.list"
+        ok "mirror configured"
+    fi
 fi
 
 # -------------------- packages --------------------
 
 say "Packages"
 export DEBIAN_FRONTEND=noninteractive
-# **`pkg upgrade` is deliberately NOT run.** It was in the first version and it hung the whole
-# install: this device had 74 packages to upgrade, and dpkg asks about configuration-file
-# conflicts even under DEBIAN_FRONTEND=noninteractive - with no terminal to answer, it waits
-# forever at "Building dependency tree...". Measured: six minutes with zero bytes downloaded
-# and no .deb in the cache.
-#
-# It is also unnecessary: `pkg install` resolves what it needs on its own.
-#
-# The dpkg options below suppress the prompts it would otherwise still ask.
+# **`pkg upgrade` is deliberately NOT run.** It hung the first install: this device had 74
+# packages to upgrade, and dpkg asks about configuration-file conflicts even under
+# DEBIAN_FRONTEND=noninteractive - with no terminal to answer it waits forever at
+# "Building dependency tree...". Measured: six minutes, prefix stuck at 81 MB, no .deb cached.
+# It is also unnecessary, since `pkg install` resolves what it needs.
 DPKG_OPTS="-o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef -o Dpkg::Use-Pty=0"
 
-# Recover from an interrupted run before starting a new one: a killed dpkg leaves packages half
-# configured and the next install refuses to proceed.
 if [ -e "$PREFIX/var/lib/dpkg/lock" ] || [ -e "$PREFIX/var/lib/dpkg/lock-frontend" ]; then
     info "clearing stale dpkg locks from an interrupted run"
     rm -f "$PREFIX/var/lib/dpkg/lock" "$PREFIX/var/lib/dpkg/lock-frontend" \
@@ -113,6 +171,7 @@ if [ -d "$CLONE_DIR/.git" ]; then
     info "already cloned; updating"
     git -C "$CLONE_DIR" pull --ff-only 2>&1 | tail -n 3
 else
+    # --depth 1 keeps it small over a phone connection.
     git clone --depth 1 "$REPO_URL" "$CLONE_DIR" || die "git clone failed"
 fi
 cd "$CLONE_DIR" || die "cannot enter $CLONE_DIR"
@@ -121,10 +180,7 @@ ok "at $CLONE_DIR"
 if [ -f .env ]; then
     info ".env exists - not touched"
 else
-    if [ -f .env.example ]; then
-        cp .env.example .env
-        warn ".env created - fill in BOT_TOKEN and ADMIN_USER_IDS before starting"
-    fi
+    [ -f .env.example ] && cp .env.example .env && warn ".env created - fill in BOT_TOKEN and ADMIN_USER_IDS"
 fi
 mkdir -p data cookies
 ok "data/ and cookies/ ready"
@@ -167,4 +223,10 @@ cat <<'NEXT'
     Then run:
 
         bash ~/twitter_pixiv_tg_bot/scripts/run-bot.sh
+
+    If you set a proxy above, keep it for future sessions by adding to ~/.bashrc:
+
+        export http_proxy=$(cat ~/.proxy-url)
+        export https_proxy=$http_proxy
+        export all_proxy=$http_proxy
 NEXT
