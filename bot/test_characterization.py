@@ -50,12 +50,32 @@ import tag_translations
 PASSED: list[str] = []
 FAILED: list[str] = []
 
+# Why the next check is about to fail.
+#
+# check() is handed a bool, not the helper that produced it, so it has no way to ask what went
+# wrong. Helpers return False for several different reasons and a bare "FAIL  <name>" left the
+# cause to be guessed at - and the guess was usually wrong. A helper that wants to explain itself
+# calls note() first; check() prints it for a failure and clears it either way, so a reason cannot
+# leak onto an unrelated check.
+LAST_REASON = ""
+
+
+def note(reason: str) -> None:
+    """Record why the check that is about to run will fail. See LAST_REASON."""
+    global LAST_REASON
+    LAST_REASON = reason
+
 
 def check(name: str, condition, detail: str = "") -> bool:
+    global LAST_REASON
     ok = bool(condition)
     (PASSED if ok else FAILED).append(name)
+    # note() names the precise cause; `detail` is the generic fallback written next to the
+    # check, so the specific one wins.
+    reason = LAST_REASON or detail
+    LAST_REASON = ""
     print(f"{'PASS' if ok else 'FAIL'}  {name}"
-          f"{(' -> ' + str(detail)) if detail and not ok else ''}")
+          f"{(' -> ' + str(reason)) if reason and not ok else ''}")
     return ok
 
 
@@ -885,6 +905,22 @@ def _lock_waits_for_the_holder() -> bool:
     Run in a child process, because the lock is per-process by design: an in-process test
     would hold it with the same handle and prove nothing. Both processes point at the same
     temporary file, so a running bot cannot interfere.
+
+    **The child needs its own sys.path.** A bare ``python -c`` inherits nothing, and from the
+    project root ``import bot`` finds the ``bot/`` *directory* - there is no ``bot/__init__.py``,
+    so it becomes a namespace package with no ``acquire_instance_lock`` on it. The child used to
+    die with
+
+        AttributeError: module 'bot' has no attribute 'acquire_instance_lock'
+
+    before it ever reached the lock, so this check was reporting an import failure as a lock
+    failure and had never tested the lock at all. The path is now passed absolutely rather than
+    relying on the working directory.
+
+    **And a dead child now says so.** Its stderr went to DEVNULL and the bare ``except`` returned
+    False, which is how the AttributeError stayed invisible. A non-zero exit is reported with the
+    child's last line, because "the child crashed" and "the lock did not wait" need different
+    fixes and looked identical.
     """
     import subprocess as _sp
     import sys as _sys
@@ -893,32 +929,57 @@ def _lock_waits_for_the_holder() -> bool:
         with _with_temporary_lock_file():
             lock_path = str(bot.INSTANCE_LOCK_FILE)
             if bot.acquire_instance_lock(2.0) is not True:
+                note("the parent could not take the lock even with nothing else holding it")
                 return False
+            vendor = HERE / "vendor"
             child = (
-                "import sys, time; sys.path.append('vendor'); import bot;"
+                f"import sys, time; sys.path.insert(0, r'{HERE}');"
+                f"sys.path.insert(0, r'{vendor}');"
+                "import bot;"
                 f"bot.INSTANCE_LOCK_FILE = r'{lock_path}';"
                 "t=time.monotonic(); got=bot.acquire_instance_lock(8.0);"
                 "print(got, round(time.monotonic()-t, 2))"
             )
             try:
                 proc = _sp.Popen([_sys.executable, "-c", child], stdout=_sp.PIPE,
-                                 stderr=_sp.DEVNULL, text=True, encoding="utf-8")
+                                 stderr=_sp.PIPE, text=True, encoding="utf-8")
                 _tm.sleep(1.0)
                 bot.release_instance_lock()
-                out = (proc.communicate(timeout=30)[0] or "").strip()
-            except Exception:  # noqa: BLE001
+                out, err = proc.communicate(timeout=30)
+            except Exception as exc:  # noqa: BLE001
+                note(f"the child process could not be run: {type(exc).__name__}: {exc}")
                 return False
             finally:
                 bot.release_instance_lock()
-    except Exception:  # noqa: BLE001
+
+            out = (out or "").strip()
+            err = (err or "").strip()
+
+            # A child that died says nothing about the lock, so report it as such rather than
+            # letting the parsing below turn it into a vague False.
+            if proc.returncode != 0:
+                last = err.splitlines()[-1] if err else "no output"
+                note(f"the child exited {proc.returncode}: {last}")
+                return False
+            if not out:
+                note("the child produced no output; it could not have tested the lock")
+                return False
+    except Exception as exc:  # noqa: BLE001
+        note(f"{type(exc).__name__}: {exc}")
         return False
-    if not out:
-        return False
+
     try:
         got_text, elapsed_text = out.split()
-        return got_text == "True" and float(elapsed_text) >= 0.5
     except ValueError:
+        note(f"the child printed something unexpected: {out!r}")
         return False
+    if got_text != "True":
+        note(f"the child did not get the lock at all: {out!r}")
+        return False
+    if float(elapsed_text) < 0.5:
+        note(f"the child took the lock in {elapsed_text}s, so it never waited for the holder")
+        return False
+    return True
 
 
 def _scoped_menus_skip_the_blocklist() -> bool:
@@ -1416,6 +1477,95 @@ def _public_embed_urls_accepts_no_status() -> bool:
     return "report is not None and status is not None" in source
 
 
+def _ptb_keywords(func):
+    """
+    The keyword names ``func`` accepts, or None when it takes ``**kwargs`` and so accepts any.
+
+    Read from the installed library rather than written out by hand: the bug these doubles exist
+    to catch *was* a signature mismatch, and a hand-copied list would drift the same way.
+    """
+    import inspect
+
+    params = inspect.signature(func).parameters
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return None
+    return {
+        name
+        for name, p in params.items()
+        if p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+
+
+def _ptb_edit_keywords():
+    """The real edit_caption / edit_text keyword sets, or an empty dict if unavailable."""
+    try:
+        from telegram import Message
+
+        return {
+            "edit_caption": _ptb_keywords(Message.edit_caption),
+            "edit_text": _ptb_keywords(Message.edit_text),
+        }
+    except Exception:  # noqa: BLE001 - a missing library is not this test's subject
+        return {}
+
+
+_PTB_EDIT_KEYWORDS = _ptb_edit_keywords()
+
+
+def _reject_unexpected(method: str, kwargs: dict):
+    """
+    Raise the same TypeError the real method would, for an argument it does not accept.
+
+    **This is the whole point of the doubles.** ``async def edit_caption(self, caption=None,
+    **kwargs)`` accepted link_preview_options, which ``Message.edit_caption`` does not - so
+    update_result_message looked correct here while every 重新生成 on a photo message died with
+
+        TypeError: Message.edit_caption() got an unexpected keyword argument 'link_preview_options'
+
+    and TypeError is not a TelegramError, so it escaped the handler entirely. Eleven of those in
+    one log before anyone looked.
+    """
+    allowed = _PTB_EDIT_KEYWORDS.get(method)
+    if allowed is None:
+        return
+    unexpected = set(kwargs) - allowed
+    if unexpected:
+        raise TypeError(
+            f"Message.{method}() got an unexpected keyword argument "
+            f"'{sorted(unexpected)[0]}'"
+        )
+
+
+class StrictMessage:
+    """
+    A telegram.Message stand-in that refuses what the real one refuses.
+
+    Records which edit was attempted, so a wrong branch is visible, and passes unknown keywords to
+    _reject_unexpected so a wrong *argument* is too.
+    """
+
+    def __init__(self, has_photo=False):
+        self.photo = [object()] if has_photo else []
+        self.calls = []
+        self.message_id = 1
+        self.chat_id = 1
+        self.caption = None
+
+    async def edit_caption(self, caption=None, **kwargs):
+        # **Recorded before the signature is enforced.** If the argument is one the real method
+        # refuses this raises, and update_result_message catches it - so recording afterwards
+        # would leave `calls` empty and the test able to say only "it returned False", not what
+        # was attempted. That is exactly how the original bug stayed invisible.
+        self.calls.append(("edit_caption", caption, dict(kwargs)))
+        _reject_unexpected("edit_caption", kwargs)
+        return self
+
+    async def edit_text(self, text=None, **kwargs):
+        self.calls.append(("edit_text", text, dict(kwargs)))
+        _reject_unexpected("edit_text", kwargs)
+        return self
+
+
 def _result_message_helper_works() -> bool:
     """
     update_result_message must edit a caption on a photo and text on a text message.
@@ -1425,39 +1575,62 @@ def _result_message_helper_works() -> bool:
     """
     import asyncio
 
-    class Msg:
-        def __init__(self, has_photo):
-            self.photo = [object()] if has_photo else []
-            self.calls = []
-            self.message_id = 1
-            self.chat_id = 1
-            self.caption = None
-
-        async def edit_caption(self, caption=None, **kwargs):
-            self.calls.append(("edit_caption", caption))
-            return self
-
-        async def edit_text(self, text=None, **kwargs):
-            self.calls.append(("edit_text", text))
-            return self
-
+    # StrictMessage, not a local class with **kwargs: see _reject_unexpected for why the
+    # permissive version let a real crash through.
     async def scenario():
-        text_msg = Msg(False)
-        photo_msg = Msg(True)
+        text_msg = StrictMessage(False)
+        photo_msg = StrictMessage(True)
         ok_text = await bot.update_result_message(text_msg, "summary")
         ok_photo = await bot.update_result_message(photo_msg, "summary")
-        if not (ok_text and ok_photo):
+
+        # **Inspect the attempts before the return values.**
+        #
+        # When the caption call is made with an argument the real method refuses, it raises
+        # TypeError, update_result_message catches it and returns False - so checking the return
+        # values first reports only "returned False" and leaves the actual mistake unnamed.
+        # StrictMessage records the attempt even when it rejects it, so the cause is visible here.
+        if photo_msg.calls:
+            method, _, kwargs = photo_msg.calls[0]
+            if method != "edit_caption":
+                note(f"a photo message was updated with {method}(), which Telegram refuses with "
+                     f"'There is no text in the message to edit'")
+                return False
+            if "link_preview_options" in kwargs:
+                note("link_preview_options was passed to edit_caption; PTB's edit_caption has no "
+                     "such parameter and raises TypeError - which is not a TelegramError, so it "
+                     "escapes the handler entirely")
+                return False
+        if text_msg.calls:
+            method, _, kwargs = text_msg.calls[0]
+            if method != "edit_text":
+                note(f"a text message was updated with {method}() instead of edit_text()")
+                return False
+            # The text edit should still carry it, or the caption fix threw away the feature.
+            if "link_preview_options" not in kwargs:
+                note("link_preview_options is missing from edit_text; the link preview setting "
+                     "was lost while fixing the caption call")
+                return False
+
+        if not ok_text:
+            note("update_result_message returned False for a text message")
             return False
-        if text_msg.calls[0][0] != "edit_text":
+        if not ok_photo:
+            note(f"update_result_message returned False for a photo message"
+                 f"{'; it used ' + photo_msg.calls[0][0] + '()' if photo_msg.calls else ''}")
             return False
-        if photo_msg.calls[0][0] != "edit_caption":
+        if not photo_msg.calls:
+            note("no edit was attempted on the photo message at all")
             return False
         # And the caption actually carries the new text, not an empty placeholder.
-        return photo_msg.calls[0][1] == "summary"
+        if photo_msg.calls[0][1] != "summary":
+            note(f"the caption was {photo_msg.calls[0][1]!r}, not the new text")
+            return False
+        return True
 
     try:
         return asyncio.run(scenario())
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        note(f"{type(exc).__name__}: {exc}")
         return False
 
 
@@ -1465,23 +1638,8 @@ def _empty_caption_is_refused() -> bool:
     """An empty caption on a photo must return False, not raise or send an empty edit."""
     import asyncio
 
-    class Msg:
-        photo = [object()]
-        message_id = 1
-
-        def __init__(self):
-            self.calls = []
-
-        async def edit_caption(self, caption=None, **kwargs):
-            self.calls.append(caption)
-            return self
-
-        async def edit_text(self, text=None, **kwargs):
-            self.calls.append(text)
-            return self
-
     async def scenario():
-        msg = Msg()
+        msg = StrictMessage(True)
         result = await bot.update_result_message(msg, "")
         return result is False and not msg.calls
 

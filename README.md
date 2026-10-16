@@ -588,3 +588,14 @@ was made once here, with a single `PATCH` that looked harmless.
 Run `-Verify` after anything that touches releases. See
 [VERSIONS.md](VERSIONS.md#publishing-a-release) for what each check covers and what the API does
 if you go around the script.
+
+
+## Versions
+
+| version | release | what changed |
+| --- | --- | --- |
+| **1.3.1** | [v1.3.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.3.1) | a fix: 重新生成 crashed on any gallery whose cover had loaded. See below |
+| **1.3** | [v1.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.3) | one version number for the manager; the stop-everything button |
+| **1.0** | [v1.0](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.0) | first release |
+
+Full history and the bump rules are in [VERSIONS.md](VERSIONS.md).

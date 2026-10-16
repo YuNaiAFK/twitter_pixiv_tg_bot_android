@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.3.1** | [v1.3.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.3.1) | **a fix, no new capability.** 重新生成 crashed on any gallery whose cover had loaded - `update_result_message` handed `link_preview_options` to both `edit_caption` and `edit_text`, and only the latter accepts it. `TypeError` is not a `TelegramError`, so it escaped the handler as 處理更新時發生未預期錯誤, eleven times in one log. The test doubles took `**kwargs` and so accepted what the real method refuses, which is why it shipped; they now enforce the installed library's signature |
 | **1.3** | [v1.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.3) | the version itself: shown in the app's header, reported by the panel, one number for everything. `VERSION.properties` becomes the only place it is written and `build.ps1 -Bump` maintains it |
 | **1.2** | - | **全部關閉（含面板）** - stop the bot, the server and finally the panel. Answered before it exits, so the app sees success rather than a dropped connection |
 | **1.1** | - | the start-services card, so the app can start everything over `RUN_COMMAND` without anyone opening Termux. The log follows its newest line instead of sitting wherever it was |
