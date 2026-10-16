@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Start everything this project needs, in dependency order: server, then bot, then panel.
+# Start everything this project needs, in dependency order: server, alist, bot, panel.
 #
 #   bash scripts/start-all.sh            # start whatever is not already up
 #   bash scripts/start-all.sh --status   # report only, change nothing
@@ -14,6 +14,8 @@
 # Order matters and each step is waited for:
 #
 #   server  the bot is configured with TELEGRAM_LOCAL=1, so it expects http://127.0.0.1:8081
+#   alist   the local image host the bot publishes gallery images through; it has no dependencies
+#           of its own, but it must be up before the bot serves a link
 #   bot     after the server, or it fails its startup probe and falls back to the 50 MB API
 #   panel   last, because it is what the app polls; starting it first would let the app see a
 #           panel whose buttons then fail
@@ -31,6 +33,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOG_FILE="$PROJECT_DIR/data/start-all.log"
 API_PORT="${API_PORT:-8081}"
 PANEL_PORT="${PANEL_PORT:-8090}"
+ALIST_PORT="${ALIST_PORT:-5244}"
 
 MODE="start"
 case "${1:-}" in
@@ -116,6 +119,7 @@ if [ "$MODE" = "status" ]; then
     else
         bad "bot      not running"
     fi
+    if port_open "$ALIST_PORT"; then ok "alist    listening on $ALIST_PORT"; else bad "alist    not listening on $ALIST_PORT"; fi
     if port_open "$PANEL_PORT"; then ok "panel    listening on $PANEL_PORT"; else bad "panel    not listening on $PANEL_PORT"; fi
     printf '\n'
     exit 0
@@ -138,6 +142,9 @@ if [ "$MODE" = "stop" ]; then
     # talks to avoids a burst of connection errors in its log as the server disappears.
     no "bot      stopping…"
     bash "$PROJECT_DIR/scripts/run-bot.sh" --stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
+
+    no "alist    stopping…"
+    bash "$PROJECT_DIR/scripts/run-alist.sh" stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
 
     no "server   stopping…"
     bash "$PROJECT_DIR/scripts/run-server.sh" stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
@@ -170,6 +177,7 @@ if [ "$MODE" = "restart" ]; then
     bash "$PROJECT_DIR/control/run-panel.sh" stop  2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
     bash "$PROJECT_DIR/scripts/run-bot.sh" --stop  2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
     bash "$PROJECT_DIR/scripts/run-server.sh" stop 2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
+    bash "$PROJECT_DIR/scripts/run-alist.sh" stop  2>&1 | tee -a "$LOG_FILE" | sed 's/^/  /'
     sleep 2
 fi
 
@@ -216,7 +224,23 @@ else
     fi
 fi
 
-# --- 2. the bot ------------------------------------------------------------------------------
+# --- 2. AList, the local image host ----------------------------------------------------------
+# Before the bot, because the bot writes gallery images into it and hands out the URLs. Not fatal
+# if it fails: a gallery can still be read through Telegraph with e-hentai's own links, and the
+# panel is worth starting so the failure is visible.
+if port_open "$ALIST_PORT"; then
+    ok "alist    already listening on $ALIST_PORT"
+else
+    no "alist    starting…"
+    bash "$PROJECT_DIR/scripts/run-alist.sh" start >>"$LOG_FILE" 2>&1 || true
+    if wait_for_port "$ALIST_PORT" 30; then
+        ok "alist    listening on $ALIST_PORT"
+    else
+        bad "alist    did not start - see $PROJECT_DIR/data/alist.log"
+    fi
+fi
+
+# --- 3. the bot ------------------------------------------------------------------------------
 if alive_from_pidfile "$PROJECT_DIR/data/bot.pid" || pgrep -f "$PROJECT_DIR/bot/bot.py" >/dev/null 2>&1; then
     ok "bot      already running"
 else
@@ -234,7 +258,7 @@ else
     fi
 fi
 
-# --- 3. the control panel --------------------------------------------------------------------
+# --- 4. the control panel --------------------------------------------------------------------
 if port_open "$PANEL_PORT"; then
     ok "panel    already listening on $PANEL_PORT"
 else
