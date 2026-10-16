@@ -40,6 +40,9 @@ declare -A TARGETS=(
     [scripts_run-server.sh]="scripts/run-server.sh"
     [scripts_boot-services.sh]="scripts/boot-services.sh"
     [scripts_enable-external-apps.sh]="scripts/enable-external-apps.sh"
+    [scripts_install-staged.sh]="scripts/install-staged.sh"
+    [scripts_check-images.sh]="scripts/check-images.sh"
+    [scripts_check-page-images.sh]="scripts/check-page-images.sh"
     [VERSION.properties]="VERSION.properties"
 )
 
@@ -52,6 +55,9 @@ for arg in "$@"; do
         panel.py) wanted+=("control_panel.py") ;;
         index.html) wanted+=("control_index.html") ;;
         start-all.sh) wanted+=("scripts_start-all.sh") ;;
+        check-images.sh) wanted+=("scripts_check-images.sh") ;;
+        check-page-images.sh) wanted+=("scripts_check-page-images.sh") ;;
+        install-staged.sh) wanted+=("scripts_install-staged.sh") ;;
         VERSION.properties) wanted+=("VERSION.properties") ;;
         *) wanted+=("$arg") ;;
     esac
