@@ -38,33 +38,59 @@ derive_target() {
     esac
 }
 
-# A bare filename resolves to whichever staged file targets it.
-find_staged_for() {
+# Every staged file whose target ends in the given path, or whose target *is* it.
+#
+# **This returns all matches, and the caller refuses when there is more than one.**
+#
+# It used to return the first, and the argument handling tried an exact staged name before this
+# function at all. Together those produced a silent wrong install: a stale `bot.py` left in the
+# staging directory meant `install-staged.sh bot.py` matched it directly, `derive_target("bot.py")`
+# is `bot.py` with no underscore to split, and the file went to the project root instead of
+# `bot/bot.py`. The hash check passed because it compared the staged copy against the copy it had
+# just written - so a deploy reported success while changing nothing, and three bot.py fixes were
+# "installed" without ever reaching the device.
+find_staged_matches() {
     local want="$1" name rel
     for path in "$STAGE"/*; do
         [ -f "$path" ] || continue
         name="$(basename "$path")"
         rel="$(derive_target "$name")"
-        case "$rel" in
-            */"$want") printf '%s\n' "$name"; return 0 ;;
-        esac
+        if [ "$rel" = "$want" ] || [ "${rel%/"$want"}" != "$rel" ]; then
+            printf '%s\n' "$name"
+        fi
     done
-    return 1
 }
 
 staged=()
+# Initialised before the argument loop: it used to be set to 0 after it, which wiped out the
+# "MISSING" and "AMBIGUOUS" failures the loop had just recorded and let a bad deploy report success.
+failed=0
 if [ "$#" -eq 0 ]; then
     for path in "$STAGE"/*; do
         [ -f "$path" ] && staged+=("$(basename "$path")")
     done
 else
     for arg in "$@"; do
-        if [ -f "$STAGE/$arg" ]; then
+        matches="$(find_staged_matches "$arg")"
+        count=$(printf '%s' "$matches" | grep -c . || true)
+
+        if [ "$count" -gt 1 ]; then
+            echo "  AMBIGUOUS '$arg' matches more than one staged file:"
+            printf '%s\n' "$matches" | sed 's/^/      /'
+            echo "      pass the staged name instead, e.g. $(printf '%s' "$matches" | head -1)"
+            failed=1
+            continue
+        fi
+
+        if [ "$count" -eq 1 ]; then
+            staged+=("$matches")
+        elif [ -f "$STAGE/$arg" ]; then
+            # Not reachable by target and present by name: a staged name that carries no directory —
+            # VERSION.properties is the one real case.
             staged+=("$arg")
-        elif name="$(find_staged_for "$arg")"; then
-            staged+=("$name")
         else
             echo "  MISSING nothing staged matches '$arg'"
+            failed=1
         fi
     done
 fi
@@ -75,7 +101,6 @@ if [ "${#staged[@]}" -eq 0 ]; then
 fi
 
 echo "=== installing ${#staged[@]} file(s) ==="
-failed=0
 for name in "${staged[@]}"; do
     rel="$(derive_target "$name")"
     dest="$PROJECT_DIR/$rel"
@@ -99,6 +124,10 @@ for name in "${staged[@]}"; do
         continue
     fi
     printf '  ok   %-34s %s\n' "$rel" "${a:0:12}"
+    # The absolute destination, on its own line. When the target is wrong this is the one thing that
+    # makes it visible: the bug that prompted it wrote `<project>/bot.py` instead of
+    # `<project>/bot/bot.py` and reported "ok bot.py" both times.
+    printf '         -> %s\n' "$dest"
 done
 
 echo

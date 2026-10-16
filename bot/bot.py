@@ -2598,6 +2598,35 @@ def acquire_instance_lock(timeout: float) -> bool:
         return True
 
 
+def enable_thread_dumps() -> bool:
+    """
+    Print every thread's stack on a timer, when DEBUG_TRACEBACK_SECONDS is set.
+
+    **For diagnosing a hang, not for running with.** The bot once stopped mid-sweep with the event
+    loop in epoll_wait and the only worker thread in futex_wait_queue_me, which says it was waiting
+    on something that is neither CPU work nor a pending thread job - and nothing observable from
+    outside the process could say which await it was. A periodic dump names the line.
+
+    Off unless the variable is set, and the interval is clamped to something that cannot flood a
+    log: this is scaffolding to be removed once the fault is understood, not a feature.
+    """
+    import faulthandler
+
+    try:
+        seconds = int(env_number("DEBUG_TRACEBACK_SECONDS", 0))
+    except Exception:  # noqa: BLE001
+        seconds = 0
+    if seconds <= 0:
+        return False
+    seconds = max(15, seconds)
+    # repeat=True so a hang that lasts hours keeps reporting; file=sys.stderr so it joins the log
+    # rather than the status output.
+    import sys
+    faulthandler.dump_traceback_later(seconds, repeat=True, file=sys.stderr)
+    logger.warning("已啟用執行緒堆疊定期輸出（每 %d 秒）—— 這是診斷用途", seconds)
+    return True
+
+
 def release_instance_lock() -> None:
     """Release the single-instance lock, so the next start does not have to wait."""
     global _instance_lock_handle
@@ -8668,6 +8697,8 @@ def build_application() -> Application:
 
 
 def main():
+    enable_thread_dumps()
+
     if len(sys.argv) > 1 and sys.argv[1] in {"--check", "--selfcheck"}:
         raise SystemExit(run_self_check())
 
