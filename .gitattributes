@@ -23,3 +23,10 @@
 # Installable packages: never line-ending converted.
 *.apk  binary
 *.keystore binary
+
+# PowerShell scripts must keep their CRLF and their UTF-8 BOM.
+#
+# The BOM is content, not an encoding detail: Windows PowerShell 5.1 reads a .ps1 as ANSI
+# without it, so a script containing an em dash or Chinese fails to parse with an error pointing
+# at a line that is correct. tools/check_encodings.py verifies this.
+*.ps1 text eol=crlf

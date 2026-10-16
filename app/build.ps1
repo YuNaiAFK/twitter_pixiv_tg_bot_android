@@ -1,4 +1,4 @@
-# Build the control app's APK without Gradle.
+﻿# Build the control app's APK without Gradle.
 #
 # Gradle plus the Android Gradle Plugin is roughly 500 MB of downloads and a first build that
 # spends minutes resolving dependencies. This app is one activity with no library dependencies,

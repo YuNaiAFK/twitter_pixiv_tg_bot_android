@@ -599,3 +599,25 @@ if you go around the script.
 | **1.0** | [v1.0](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.0) | first release |
 
 Full history and the bump rules are in [VERSIONS.md](VERSIONS.md).
+
+
+## Editing the PowerShell scripts
+
+**`app/build.ps1` and `tools/release.ps1` must keep a UTF-8 BOM.**
+
+Windows PowerShell 5.1 - which is what `powershell` runs - reads a `.ps1` as ANSI unless it starts
+with one. A file holding an em dash, an ellipsis or any Chinese is then decoded byte by byte into
+the system codepage, and the failure is not cosmetic: the parser sees broken bytes inside what were
+string literals and reports
+
+    The string is missing the terminator: ".
+    Missing closing '}' in statement block or type definition.
+
+pointing at lines that are perfectly correct. `pwsh` runs the same file happily, because PowerShell
+7 reads UTF-8 by default, so the mistake survives right up until someone uses `powershell`.
+
+    python tools/check_encodings.py          # verify
+    python tools/check_encodings.py --fix    # repair
+
+Any tool that rewrites these files can drop the BOM - a plain `Path.write_text(..., "utf-8")` in
+Python does. Run the check after editing them with something other than an editor.

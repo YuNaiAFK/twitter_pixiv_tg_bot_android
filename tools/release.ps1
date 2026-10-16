@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Manage GitHub releases for this project - without the ability to destroy one.
 
@@ -48,7 +48,11 @@ param(
     # **Replace** an already-uploaded asset on a release. The only destructive option here, and it
     # needs the release tag and the asset name spelled out.
     [string]$ReplaceAsset = "",
-    [string]$OnRelease = ""
+    [string]$OnRelease = "",
+
+    # Where termux.apk is, for -Create. It is 108.6 MB and cannot live in the repository, so it is
+    # looked for in a few known places when this is not given.
+    [string]$TermuxApk = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -299,21 +303,48 @@ if ($Create) {
         @{ path = (Join-Path $ApkDir "termux-api.apk");  name = "termux-api.apk" },
         @{ path = (Join-Path $ApkDir "termux-boot.apk"); name = "termux-boot.apk" }
     )
+
+    # termux.apk is 108.6 MB and cannot live in the repository, so it has to be found elsewhere.
+    # Searched rather than required, because it only exists on the machine that set the phone up -
+    # and if it is missing the release is still worth publishing, just without the one file that
+    # is identical in every release.
+    $termux = if ($TermuxApk -and (Test-Path $TermuxApk)) { $TermuxApk } else { "" }
+    if (-not $termux) {
+        foreach ($candidate in @(
+            (Join-Path $ProjectDir "apk/termux.apk"),
+            (Join-Path (Split-Path $ProjectDir -Parent) "_android_tools/com.termux_1002.apk"),
+            (Join-Path (Split-Path $ProjectDir -Parent) "_android_tools/termux.apk")
+        )) {
+            if (Test-Path $candidate) { $termux = $candidate; break }
+        }
+    }
+    if ($termux) {
+        $files += @{ path = $termux; name = "termux.apk" }
+        Info "termux.apk found at $termux"
+    } else {
+        Warn "termux.apk not found - the release will be missing it"
+        Warn "  pass -TermuxApk <path>, or place it at apk/termux.apk"
+        Warn "  it is identical in every release, so an older one still serves it"
+    }
+
     foreach ($f in $files) {
-        if (-not (Test-Path $f.path)) { Warn "skipping $($f.name): not in $ApkDir"; continue }
+        if (-not (Test-Path $f.path)) { Warn "skipping $($f.name): not at $($f.path)"; continue }
+        $mb = [math]::Round((Get-Item $f.path).Length / 1MB, 1)
+        Info "$($f.name)  ($mb MB)…"
         $url = "https://uploads.github.com/repos/$Repo/releases/$($release.id)/assets?name=$($f.name)"
         $up = Invoke-RestMethod -Uri $url -Method Post -Headers $Headers -InFile $f.path `
               -ContentType "application/vnd.android.package-archive" -TimeoutSec 1800
-        Ok "$($f.name)  $([math]::Round($up.size/1KB,1)) KB"
+        Ok "  $($f.name)  $([math]::Round($up.size/1KB,1)) KB"
     }
-    Info "termux.apk (108.6 MB) is not in the repository - upload it by hand, or leave it and"
-    Info "point at an older release, since the Termux build has not changed."
 
     # **Say which release is newest.** GitHub resolves /releases/latest by publication time, so a
     # rebuilt older release silently becomes "latest" and the README's link starts serving it.
+    #
+    # Sent as a fresh body rather than by setting a property on the object Invoke-RestMethod
+    # returned: that object's shape is the API's *response*, and make_latest is not one of its
+    # fields - assigning to it throws "The property cannot be found on this object", which is how
+    # the first run of this script failed after creating the release but before marking it.
     if (-not $Draft) {
-        $patch = $release
-        $patch.make_latest = "true"
         $null = Api "/releases/$($release.id)" -Method Patch -Body @{ make_latest = "true" }
         Ok "marked as the latest release"
     }
