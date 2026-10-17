@@ -1809,9 +1809,9 @@ def cached_telegraph_entry(url: str, gallery, mode: str) -> dict | None:
     """
     The Telegraph page recorded for this gallery and mode, or None.
 
-    Keyed by mode because the two are different pages with different content: "顯示圖" embeds the
-    web-sized image and "原圖" the full-resolution file, so a page built for one must not be handed
-    back for the other.
+    Keyed by mode. There is only one Telegraph mode now - the original-resolution page was removed
+    because it embedded the full-resolution files - but the keying is kept: a "顯示圖" page must not
+    be handed back for any other mode, and the archive modes share this cache.
 
     Returns the stored dict - url, path, access_token, and the sampled image URLs - not a
     TelegraphPage, because the caller also needs the samples to decide whether it still works.
@@ -5693,18 +5693,21 @@ def gallery_keyboard(gid: str, token: str) -> InlineKeyboardMarkup:
     the gallery id and token rather than any local path, so a button press is
     self-contained and cannot be used to reach an arbitrary file.
 
-    "Telegraph" publishes a page with the images embedded on it; nothing is sent to
-    the chat. "歸檔" downloads the gallery and sends it as ZIP archives. The two
-    differ in resolution: the 1280 version is the site's own web-sized image
-    (about 0.14 MB a page), the original is the full-resolution file (about 10 MB a
-    page).
+    "Telegraph" publishes a page with the web-sized images embedded on it; nothing is
+    sent to the chat. "歸檔" downloads the gallery and sends it as ZIP archives, in
+    either resolution: the 1280 version is the site's own web-sized image (about
+    0.14 MB a page), the original is the full-resolution file (about 10 MB a page).
+
+    There is one Telegraph action, not two. The original-resolution page was removed
+    because it embedded the full-resolution files: about 2 GB for a two-hundred page
+    gallery, downloaded from e-hentai and - since the page images are now copied into
+    R2 - uploaded again, to show the same pictures the display page already shows. The
+    archive actions are the way to obtain the actual files.
     """
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("Telegraph · 顯示圖",
                                  callback_data=f"eh|view|{gid}|{token}"),
-            InlineKeyboardButton("Telegraph · 原圖",
-                                 callback_data=f"eh|orig|{gid}|{token}"),
         ],
         [
             InlineKeyboardButton("歸檔 · 1280", callback_data=f"eh|zip1280|{gid}|{token}"),
@@ -5777,7 +5780,8 @@ async def run_regenerate(query, user, entry: dict) -> None:
         )
         await asyncio.to_thread(remember_gallery, gallery.page_url, gallery,
                                 (display_urls, original_urls))
-        embed = original_urls if mode == "orig" else display_urls
+        # The display URLs: there is only one Telegraph mode now, so there is nothing to choose.
+        embed = display_urls
         # Same conversion as publishing: the button embeds the same list, so without this
         # a regenerated page would be broken again on every page.
         embed = await public_embed_urls(embed, gallery, query.message)
@@ -5941,7 +5945,9 @@ def parse_gallery_callback(data: str) -> tuple[str, str, str] | None:
     if len(parts) != 4:
         return None
     mode, gid, token = parts[1], parts[2], parts[3]
-    if mode not in {"view", "orig", "zip1280", "ziporig", "stop", "regen"}:
+    # "orig" is deliberately absent: the mode was removed, so a stale button still carrying it is
+    # rejected here rather than reaching a dispatch branch that no longer exists.
+    if mode not in {"view", "zip1280", "ziporig", "stop", "regen"}:
         return None
     if not gid.isdigit() or not token.isalnum():
         return None
@@ -6034,7 +6040,6 @@ async def run_gallery_action(query, message, user, mode: str,
 
     label = {
         "view": "Telegraph · 顯示圖",
-        "orig": "Telegraph · 原圖",
         "zip1280": "歸檔 · 1280",
         "ziporig": "歸檔 · 原圖",
     }[mode]
@@ -6089,7 +6094,7 @@ async def run_gallery_action(query, message, user, mode: str,
                 await asyncio.to_thread(remember_gallery, gallery_url, gallery)
             source_note = build_caption(gallery_url)
 
-            if mode in {"view", "orig"}:
+            if mode == "view":
                 await run_gallery_images(
                     message, status, gallery, mode, temp_dir, source_note, user
                 )
@@ -6274,7 +6279,9 @@ async def run_gallery_images(message, status, gallery, mode: str,
     The **cover** is the exception - one image, fetched by URL by Telegram, which
     gives the reply a face instead of opening with plain text.
 
-    "顯示圖" embeds the site's web-sized image (about 0.14 MB a page) and "原圖"
+    "顯示圖" embeds the site's web-sized image (about 0.14 MB a page). The original-resolution
+    page was removed; the archive actions are how the full-resolution files are obtained. The
+    earlier mention read: "原圖"
     the full-resolution file (about 10 MB a page) — and that is a real difference
     here, because Telegraph fetches every embedded image itself.
 
@@ -6342,7 +6349,9 @@ async def run_gallery_images(message, status, gallery, mode: str,
             link_preview_options=source_link_options(),
         )
 
-        embed = display_urls if mode == "view" else (original_urls or display_urls)
+        # The display URLs. The original-resolution page was removed; the sweep still returns both
+        # lists, so nothing has to be re-fetched if that changes.
+        embed = display_urls
         embed = await public_embed_urls(embed, gallery, status, report=True)
 
         # **Copy them somewhere permanent before the page is built.**
