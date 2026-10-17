@@ -87,8 +87,23 @@ function Api {
     $uri = if ($Path -like "http*") { $Path } else { "https://api.github.com/repos/$Repo$Path" }
     $args = @{ Uri = $uri; Method = $Method; Headers = $Headers; TimeoutSec = 120 }
     if ($Body) {
-        $args.Body = ($Body | ConvertTo-Json -Depth 6)
-        $args.ContentType = "application/json"
+        # **The JSON is converted to UTF-8 bytes, and that is not cosmetic.**
+        #
+        # Windows PowerShell 5.1 encodes a *string* body using the system ANSI codepage before
+        # sending it, so every non-ASCII character in a release name or body becomes "?". The first
+        # release published by this script came out as
+        #
+        #     v1.4 - Android ????
+        #
+        # from a source string that reads "$tag — Android 安裝套件" and is valid UTF-8 on disk with a
+        # BOM. The bytes are the only thing that fixes it: given a byte array, Invoke-RestMethod
+        # sends it unchanged. charset=utf-8 is stated as well so nothing downstream has to guess.
+        #
+        # The two earlier releases whose names are correct were not made by this template - they
+        # have a different format - so the fault had been latent rather than newly introduced.
+        $json = $Body | ConvertTo-Json -Depth 6
+        $args.Body = [System.Text.Encoding]::UTF8.GetBytes($json)
+        $args.ContentType = "application/json; charset=utf-8"
     }
     $result = Invoke-RestMethod @args
 
