@@ -4083,6 +4083,13 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         + (f"（自架伺服器：{'本機模式' if can_upload_by_path() else '遠端模式'}）"
            if LOCAL_API_SERVER else "（公開 API）"),
         f"• 連結冷卻時間：{USER_COOLDOWN_SECONDS} 秒（按鈕不受此限制）",
+        # Where the R2 ceiling sits. Reported here rather than only in the log because the operator
+        # is the one who has to clear space or raise it, and a limit they cannot see is one they
+        # will discover by having an upload refused.
+        *([f"• R2 圖床：免費額度 {r2.format_bytes(r2.free_bytes())}，"
+           f"停止上限 {r2.format_bytes(r2.limit_bytes())}"
+           f"（{r2.limit_percent():.0f}%）"]
+          if r2.r2_settings() else ["• R2 圖床：未設定（頁面圖片會使用會過期的原始網址）"]),
         "• 同一使用者同時只能有一個請求在處理中",
     ]
     if BLOCKED_USER_IDS:
@@ -6122,6 +6129,32 @@ async def run_gallery_action(query, message, user, mode: str,
         gallery_semaphore.release()
 
 
+async def notify_admins(bot, text: str, *, exclude: int = 0) -> int:
+    """
+    Send a message to every configured administrator. Returns how many were reached.
+
+    **A failure here must not become the caller's failure.** The notification is about a decision
+    already made; a Telegram error while announcing it would turn a working refusal into an error
+    the user sees. Each send is guarded separately so one unreachable administrator does not stop the
+    others.
+    """
+    sent = 0
+    for admin_id in sorted(ADMIN_USER_IDS):
+        if admin_id == exclude:
+            continue
+        try:
+            await bot.send_message(chat_id=admin_id, text=text,
+                                   link_preview_options=source_link_options())
+            sent += 1
+        except TelegramError as exc:
+            logger.warning("無法通知管理員 %s：%s", admin_id, exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("通知管理員 %s 時發生錯誤：%s", admin_id, exc)
+    if not sent:
+        logger.warning("沒有可通知的管理員（ADMIN_USER_IDS 是空的或全部失敗）")
+    return sent
+
+
 async def host_on_r2(embed: list, gallery, mode: str, status) -> list:
     """
     Copy the page's images into R2 and return the URLs to embed instead.
@@ -6146,6 +6179,42 @@ async def host_on_r2(embed: list, gallery, mode: str, status) -> list:
     if cached and len(cached) == len(embed):
         logger.info("沿用已上傳到 R2 的 %d 張圖片", len(cached))
         return cached
+
+    # **Ask the bucket before downloading anything.**
+    #
+    # The per-image check inside upload_many is what actually keeps the total inside the allowance,
+    # because only it knows how large each image is. But knowing the ceiling is already reached is
+    # worth knowing *before* thirty megabytes are fetched and then refused.
+    try:
+        used_bytes, used_count = await asyncio.to_thread(
+            r2.bucket_usage, settings)
+    except r2.R2Error as exc:
+        # Cannot tell how full it is. Uploading anyway would risk spending money to find out, so the
+        # safe direction here is to leave the images alone - unlike the expiry problem, which this
+        # only makes no worse.
+        logger.warning("無法讀取 R2 使用量，本次不改用 R2：%s", exc)
+        return embed
+
+    allowance = r2.limit_bytes()
+    if used_bytes >= allowance:
+        logger.warning("R2 免費額度已滿（%s），拒絕上傳：%s",
+                       r2.budget_line(used_bytes, used_count), gallery.page_url)
+        notice = (
+            "⛔ R2 免費額度已滿，已停止上傳\n\n"
+            f"{r2.budget_line(used_bytes, used_count)}\n\n"
+            f"畫廊：{gallery.title[:80]}\n"
+            f"{gallery.page_url}\n\n"
+            "這次的頁面仍會建立，但圖片使用 e-hentai 原始網址，過一段時間會失效。\n"
+            "請清理 R2（刪除舊畫廊）或調整 .env 的 R2_FREE_BYTES／R2_LIMIT_PERCENT，"
+            "否則之後的解析都會這樣。"
+        )
+        await notify_admins(status.get_bot(), notice)
+        await status.edit_text(
+            "⚠️ R2 免費額度已滿，這次不改用 R2（已通知管理員）。"
+            "圖片使用原始網址，過段時間可能失效。",
+            link_preview_options=source_link_options(),
+        )
+        return embed
 
     await status.edit_text(
         f"正在上傳 {len(embed)} 張圖片到 R2……",
@@ -6181,6 +6250,10 @@ async def host_on_r2(embed: list, gallery, mode: str, status) -> list:
             timeout=float(R2_UPLOAD_TIMEOUT),
             referer="https://e-hentai.org/",
             progress=progress,
+            # The ceiling and what is already stored, so each image can be tested before it is
+            # written. An upload that has happened is billed for the month.
+            already_used=used_bytes,
+            budget=allowance,
         )
     except r2.R2Error as exc:
         logger.warning("R2 上傳無法進行：%s；改用原始網址", exc)
@@ -6190,6 +6263,30 @@ async def host_on_r2(embed: list, gallery, mode: str, status) -> list:
         return embed
 
     logger.info("R2：%s", report.summary())
+
+    if report.budget_stopped:
+        # Partly uploaded and then stopped at the ceiling. The report's urls() keeps the list the
+        # same length and order with the refused images on their original URLs, so the page is built
+        # either way; what matters here is that the operator hears about it.
+        after = used_bytes
+        try:
+            after, after_count = await asyncio.to_thread(r2.bucket_usage, settings)
+        except r2.R2Error:
+            after_count = 0
+        logger.warning("R2 免費額度上限已達，停止上傳：%s",
+                       r2.budget_line(after, after_count))
+        notice = (
+            "⚠️ R2 免費額度上限已達，已停止上傳\n\n"
+            f"{r2.budget_line(after, after_count)}\n\n"
+            f"畫廊：{gallery.title[:80]}\n"
+            f"{gallery.page_url}\n\n"
+            f"本次上傳 {report.uploaded} 張後停止，"
+            f"其餘 {report.failed} 張使用 e-hentai 原始網址"
+            "（頁面仍可用，但這些圖片過段時間會失效）。\n\n"
+            "請清理 R2（刪除舊畫廊）或調整 .env 的 R2_FREE_BYTES／R2_LIMIT_PERCENT。"
+        )
+        await notify_admins(status.get_bot(), notice)
+
     if not report.uploaded and not report.reused:
         # Nothing succeeded. Handing back the original URLs keeps the gallery readable; handing back
         # a report full of failures would produce a page of broken images.
