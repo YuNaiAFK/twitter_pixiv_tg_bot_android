@@ -4627,16 +4627,23 @@ for _path, _label in (
         (str(Path(os.environ.get("SystemRoot", "C:/Windows")) / "System32"), "under Windows"),
         (str(Path(os.environ.get("USERPROFILE", "C:/Users/x"))), "a user profile root"),
         (str(Path(os.environ.get("LOCALAPPDATA", "C:/x/AppData/Local"))), "LOCALAPPDATA"),
-        (str(HERE), "the project root itself"),
+        (str(HERE), "the directory the code lives in"),
+        (str(HERE.parent), "the project root itself"),
         (str(Path("C:/somewhere/else")), "an unrelated tree"),
 ):
     check(f"cache clear refuses {_label}",
           bot.is_safe_to_clear(Path(_path)) is False,
           f"{_path} was accepted for deletion")
 check("cache clear allows the real cache dirs",
-      bot.is_safe_to_clear(bot.BASE_DIR / ".cache") is True
+      # Both locations are checked because both have been the real one. The cache belongs beside
+      # .env at the project root - that is what .env points at and where the file already is - and
+      # the old default was inside the code directory. Refusing either would make the command
+      # useless for someone who has it configured the other way.
+      bot.is_safe_to_clear(bot.PROJECT_DIR / ".cache") is True
+      and bot.is_safe_to_clear(bot.PROJECT_DIR / ".cache" / "archives") is True
+      and bot.is_safe_to_clear(bot.BASE_DIR / ".cache") is True
       and bot.is_safe_to_clear(bot.BASE_DIR / ".cache" / "archives") is True,
-      "refusing the legitimate path would make the command useless")
+      "refusing a legitimate path would make the command useless")
 check("cache clear checks safety before deleting anything",
       # The guard has to run first, or a refusal is too late.
       _order_in(inspect.getsource(bot.cache_command),

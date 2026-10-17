@@ -134,6 +134,36 @@ def env_text(name: str, default: str = "") -> str:
     return text if text else default
 
 
+# The project directory: the parent of the directory this file lives in. Every relative path in
+# .env is relative to this, not to the process's working directory - see resolve_env_path.
+PROJECT_DIR = BASE_DIR.parent
+
+
+def resolve_env_path(raw: str, default: Path, *, label: str = "") -> Path:
+    """
+    Resolve a path from .env against the project directory.
+
+    **Why not the working directory.** `Path("parse_cache.json")` is relative to wherever the process
+    was started. The bot is started from the project root by run-bot.sh, so it used
+    `<project>/parse_cache.json`; a diagnostic run from `bot/` resolved the same setting to
+    `<project>/bot/parse_cache.json` and found an empty cache. Two files, one name, different
+    contents, and nothing in the code said which was meant.
+
+    An absolute value is returned unchanged. An empty one falls back to the default, which is itself
+    built from the project directory.
+    """
+    raw = (raw or "").strip().strip('"').strip("'")
+    if not raw:
+        return default
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    resolved = PROJECT_DIR / candidate
+    if label:
+        logger.info("%s 以專案目錄解析相對路徑：%s -> %s", label, raw, resolved)
+    return resolved
+
+
 def env_number(name: str, default, *, kind=int):
     """
     Read a number from the environment, treating blank as unset.
@@ -410,7 +440,8 @@ BLOCKED_USER_IDS = {
 # (and a bootstrap for the first administrator, which cannot be granted in-chat
 # for the obvious reason); everything else can be managed with /block, /unblock,
 # /blocked, /promote, /demote and /grant, and survives restarts through this file.
-AUTH_FILE = Path(env_text("AUTH_FILE", str(BASE_DIR / "authorized.json")))
+AUTH_FILE = resolve_env_path(
+    env_text("AUTH_FILE", ""), PROJECT_DIR / "authorized.json", label="AUTH_FILE")
 
 # Group chats keep a gate mode, because "which groups may use this" is genuinely a choice:
 # with no groups authorized, this decides whether every group is welcome or none is.
@@ -812,8 +843,10 @@ def get_host(url: str) -> str:
 # What is deliberately NOT cached is the failure case: a link that failed is
 # retried, because the usual cause is a transient one or a credential that the
 # operator has since fixed.
-CACHE_FILE = Path(env_text("CACHE_FILE", str(BASE_DIR / "parse_cache.json")))
-CACHE_DIR = Path(env_text("CACHE_DIR", str(BASE_DIR / ".cache")))
+CACHE_FILE = resolve_env_path(
+    env_text("CACHE_FILE", ""), PROJECT_DIR / "parse_cache.json", label="CACHE_FILE")
+CACHE_DIR = resolve_env_path(
+    env_text("CACHE_DIR", ""), PROJECT_DIR / ".cache", label="CACHE_DIR")
 
 # A media cache is a copy of files the bot already downloaded. Kept bounded so it
 # cannot fill the disk: entries older than this are dropped when the cache is
@@ -851,7 +884,8 @@ CACHE_MAX_BYTES = env_number("CACHE_MAX_BYTES", 2 * 1024 * 1024 * 1024)
 # Storage is kept apart from the media cache and bounded on its own, because the
 # magnitudes differ by orders of magnitude: 300 cached artworks are ~100 MB, while
 # 300 cached archives would be tens of GB.
-ARCHIVE_CACHE_DIR = Path(env_text("ARCHIVE_CACHE_DIR", str(CACHE_DIR / "archives")))
+ARCHIVE_CACHE_DIR = resolve_env_path(
+    env_text("ARCHIVE_CACHE_DIR", ""), CACHE_DIR / "archives", label="ARCHIVE_CACHE_DIR")
 
 # Measured for scale: 5 archives of ~76 MiB is 0.37 GiB, 50 is 3.7 GiB. This is a disk
 # budget, not a target; the least recently used entry is evicted when it is exceeded.
@@ -1956,8 +1990,11 @@ def is_safe_to_clear(path: Path) -> bool:
     clear`` walk a whole drive. That is a one-character typo away from unrecoverable, so the
     check is explicit and refuses rather than trusting the setting.
 
-    Refused: a drive root, the Windows directory, a user profile root, the project root, and
-    anything that is not inside the project.
+    Refused: a drive root, the Windows directory, a user profile root, the project directory
+    itself, and anything outside the project.
+
+    The boundary is the **project directory**, so `<project>/.cache` and `<project>/.cache/archives`
+    both pass - which they must, because that is where the cache goes.
     """
     try:
         resolved = path.resolve()
@@ -1966,9 +2003,20 @@ def is_safe_to_clear(path: Path) -> bool:
     if resolved == Path(resolved.anchor):
         return False
 
-    base = BASE_DIR.resolve()
+    # **The project directory, not BASE_DIR.** BASE_DIR is where bot.py lives - `bot/` - but the
+    # cache belongs beside .env at the project root, which is where the settings point it and where
+    # the parse cache already is. Checking against `bot/` refused the correct location, so
+    # /cache clear answered "已拒絕清除：快取路徑看起來不安全" as soon as .cache existed.
+    base = PROJECT_DIR.resolve()
     if resolved == base:
         # Emptying the project directory would delete the bot itself.
+        return False
+
+    # **And the directory the code lives in.** Widening the boundary to the project directory made
+    # `bot/` an allowed path, which it must never be: it holds bot.py, so emptying it deletes the bot.
+    # Caught by the test that was written when `bot/` was the outermost directory this check knew
+    # about. The cache belongs at `<project>/.cache`, which is neither of these.
+    if resolved == BASE_DIR.resolve():
         return False
 
     forbidden = {Path(os.environ.get("SystemRoot", "C:/Windows")).resolve()}
@@ -3879,16 +3927,45 @@ async def cache_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                          if ARCHIVE_CACHE_DIR.is_dir() else [])
         removed = await asyncio.to_thread(delete_files_quietly, cached_files)
         archives = await asyncio.to_thread(delete_files_quietly, archive_files)
+
+        # **The in-memory state has to go too.** The disk cache was deleted while the 重新生成 map
+        # kept its entries, so the button still worked from memory after a clear that says it
+        # cleared everything. Nothing here is expensive to rebuild.
+        regenerated = len(_regenerate_cache)
+        _regenerate_cache.clear()
+        memo = len(ehentai._cookie_header_cache)
+        ehentai._cookie_header_cache.clear()
+
         PARSE_CACHE.entries.clear()
+        PARSE_CACHE.hits = 0
+        PARSE_CACHE.misses = 0
+        parse_file = "（檔案不存在）"
         try:
-            PARSE_CACHE.path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        await message.reply_text(
-            f"已清除解析快取：{removed} 個檔案。\n"
-            f"已清除歸檔快取：{archives} 個檔案。\n"
-            "下次解析會重新下載。"
-        )
+            if PARSE_CACHE.path.exists():
+                size = PARSE_CACHE.path.stat().st_size
+                PARSE_CACHE.path.unlink()
+                parse_file = f"{size / 1024:.1f} KB"
+            else:
+                parse_file = "（檔案不存在）"
+        except OSError as exc:
+            parse_file = f"刪除失敗：{exc}"
+
+        # Files whose cache entry is gone have nothing pointing at them, and this is the one moment
+        # they are certainly unwanted. Called after the entry file is removed so it sees the truth.
+        orphans = await asyncio.to_thread(prune_orphaned_cache_files)
+
+        parts = [
+            "已清除全部快取：",
+            f"• 解析快取檔：{parse_file}",
+            f"• 快取目錄：{removed} 個檔案",
+            f"• 歸檔快取：{archives} 個檔案",
+            f"• 無主檔案：{orphans} 個",
+            f"• 重新生成對應：{regenerated} 筆（記憶體）",
+            f"• Cookie 備忘：{memo} 筆（記憶體）",
+            "",
+            "下次解析會重新下載，並重新上傳到 R2。",
+        ]
+        await message.reply_text("\n".join(parts))
         return
 
     size_kb = 0
