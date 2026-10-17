@@ -99,6 +99,26 @@
 
   details { margin-top: 12px; }
   summary { cursor: pointer; color: var(--dim); font-size: 13px; padding: 6px 2px; }
+.bar {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.25);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: #34c759;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+.bar-fill.warn { background: #ff9f0a; }
+.bar-fill.full { background: #ff3b30; }
+/* renderR2 uses a fourth state, "full", which the stylesheet did not have: a bucket at its ceiling
+   would have rendered with no colour, in the one case where the colour is the point. */
+.dot.full { background: var(--bad); box-shadow: 0 0 8px rgba(255,59,48,.6); }
+.full-text { color: var(--bad); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -128,6 +148,16 @@
     <div class="label">磁碟 / 快取</div>
     <div class="value"><span id="disk-text">—</span></div>
     <div class="detail" id="disk-detail">—</div>
+  </div>
+  <div class="card">
+    <div class="label">R2 圖床</div>
+    <div class="value"><span class="dot" id="r2-dot"></span><span id="r2-text">—</span></div>
+    <div class="detail" id="r2-detail">—</div>
+    <!-- A bar rather than only a number: the useful thing about a storage quota is how close it is,
+         and "8.9 GB / 10 GB" takes a moment to read while a bar does not. -->
+    <div class="bar" id="r2-bar-wrap" style="display:none">
+      <div class="bar-fill" id="r2-bar"></div>
+    </div>
   </div>
 </div>
 
@@ -257,10 +287,44 @@ async function refreshStatus() {
 
     $("disk-text").textContent = s.disk.free_h ? s.disk.free_h + " 可用" : "—";
     $("disk-detail").textContent = "快取 " + (s.cache_h || "—");
+
+    renderR2(s.r2);
     $("clock").textContent = new Date(s.time * 1000).toLocaleTimeString("zh-TW", { hour12: false });
   } catch (e) {
     setStatus("bot", "off", "無法連線", String(e));
   }
+}
+
+function renderR2(r2) {
+  // Every branch sets all four elements, so a value left over from a previous poll can never sit
+  // under a dot that says something else.
+  const bar = $("r2-bar");
+  const wrap = $("r2-bar-wrap");
+
+  if (!r2 || r2.state === "unconfigured") {
+    setStatus("r2", "off", "未設定", "圖片會使用會過期的原始網址");
+    wrap.style.display = "none";
+    return;
+  }
+  if (r2.state !== "ok") {
+    // Not a zero. Saying "0 GB" when the bucket could not be read is the kind of wrong answer
+    // someone acts on, which is worse than saying nothing.
+    setStatus("r2", "warn", "讀取失敗", r2.reason || "無法取得用量");
+    wrap.style.display = "none";
+    return;
+  }
+
+  const percent = r2.percent || 0;
+  const level = r2.full ? "full" : (percent >= 80 ? "warn" : "on");
+  const label = r2.full ? "已滿" : percent >= 80 ? "接近上限" : "正常";
+
+  setStatus("r2", level,
+            `${r2.used_h} / ${r2.free_h}`,
+            `剩餘 ${r2.remaining_h}（${r2.objects} 個物件，${percent}%）`);
+
+  wrap.style.display = "";
+  bar.style.width = Math.min(100, percent) + "%";
+  bar.className = "bar-fill" + (level === "on" ? "" : " " + level);
 }
 
 function colourise(line) {

@@ -97,6 +97,7 @@ public class MainActivity extends Activity {
     private TextView srvValue, srvDetail;
     private TextView pxyValue, pxyDetail;
     private TextView diskValue, diskDetail;
+    private TextView r2Value, r2Detail;
     private TextView logView, logMeta, bannerText, bannerTitle, bannerDetail, versionLabel;
     private View banner;
     private Button liveButton, bannerButton;
@@ -386,6 +387,19 @@ public class MainActivity extends Activity {
         secondRow.addView(pxyCard);
         secondRow.addView(diskCard);
         root.addView(secondRow);
+
+        // Full width, unlike the other cards: the value here is "8.90 GB / 10.00 GB" and half a row
+        // is not enough for it without wrapping.
+        LinearLayout thirdRow = new LinearLayout(this);
+        thirdRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams full =
+                new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        full.setMargins(dp(3), dp(3), dp(3), dp(3));
+        LinearLayout r2Card = card(v, d, "R2 圖床", "#e6e9ef");
+        r2Value = v[0]; r2Detail = d[0];
+        r2Card.setLayoutParams(full);
+        thirdRow.addView(r2Card);
+        root.addView(thirdRow);
 
         root.addView(section("機器人"));
         root.addView(row(
@@ -756,6 +770,20 @@ public class MainActivity extends Activity {
                         : s.getJSONObject("disk").optString("free_h", "—");
                 final String cache = s.optString("cache_h", "—");
 
+                // Everything the R2 card needs, resolved here so a missing key cannot leave the UI
+                // half-updated. "state" is always present on a panel that knows about R2, and a
+                // panel that does not have the field at all reads as "unconfigured" - which is the
+                // right answer for an old panel, since this app would have nothing to show.
+                final JSONObject r2 = s.optJSONObject("r2");
+                final String r2State = r2 == null ? "unconfigured" : r2.optString("state", "error");
+                final String r2Used = r2 == null ? "" : r2.optString("used_h", "");
+                final String r2Free = r2 == null ? "" : r2.optString("free_h", "");
+                final String r2Remain = r2 == null ? "" : r2.optString("remaining_h", "");
+                final String r2Reason = r2 == null ? "" : r2.optString("reason", "");
+                final int r2Objects = r2 == null ? 0 : r2.optInt("objects", 0);
+                final double r2Percent = r2 == null ? 0 : r2.optDouble("percent", 0);
+                final boolean r2Full = r2 != null && r2.optBoolean("full", false);
+
                 ui.post(() -> {
                     if (destroyed) return;
                     // A successful poll is the detection: whatever the user did - pressed the
@@ -789,6 +817,30 @@ public class MainActivity extends Activity {
                     diskValue.setText(free + " 可用");
                     diskValue.setTextColor(Color.parseColor("#e6e9ef"));
                     diskDetail.setText("快取 " + cache);
+
+                    if ("unconfigured".equals(r2State)) {
+                        r2Value.setText("未設定");
+                        r2Value.setTextColor(Color.parseColor("#e5534b"));
+                        r2Detail.setText("圖片會使用會過期的原始網址");
+                    } else if (!"ok".equals(r2State)) {
+                        // Deliberately not "0 GB": a confident zero while the bucket is unreadable
+                        // is a number someone would act on, and clearing space that is not short
+                        // costs them their images.
+                        r2Value.setText("讀取失敗");
+                        r2Value.setTextColor(Color.parseColor("#e8b23a"));
+                        r2Detail.setText(r2Reason.isEmpty() ? "無法取得用量" : r2Reason);
+                    } else {
+                        r2Value.setText(r2Used + " / " + r2Free);
+                        if (r2Full) {
+                            r2Value.setTextColor(Color.parseColor("#e5534b"));
+                        } else if (r2Percent >= 80) {
+                            r2Value.setTextColor(Color.parseColor("#e8b23a"));
+                        } else {
+                            r2Value.setTextColor(Color.parseColor("#35c07a"));
+                        }
+                        r2Detail.setText("剩餘 " + r2Remain + "（" + r2Objects + " 個物件，"
+                                + Math.round(r2Percent) + "%）");
+                    }
                 });
             } catch (Exception exc) {
                 if (destroyed) return;
@@ -801,6 +853,8 @@ public class MainActivity extends Activity {
                     srvValue.setText("—");
                     pxyValue.setText("—");
                     diskValue.setText("—");
+                    r2Value.setText("—");
+                    r2Detail.setText("—");
                     // The panel is the only way this app can act, so an unreachable one is the
                     // single failure worth a full card rather than a red dot.
                     showVersions(null);

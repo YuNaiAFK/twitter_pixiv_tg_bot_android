@@ -478,6 +478,118 @@ def action_server(verb: str) -> dict:
     return {"ok": False, "error": f"unknown verb {verb}"}
 
 
+# How long an R2 usage reading is reused. Long enough that the app's polling costs nothing, short
+# enough that the number moves while the operator is watching it after clearing space.
+R2_USAGE_TTL = 60.0
+_r2_usage_cache: dict = {"at": 0.0, "value": None}
+
+
+# The keys r2_settings() reads. Only these are lifted out of .env: a panel process holding every
+# credential in the environment is a wider surface than one holding the five values it needs.
+R2_ENV_KEYS = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY", "R2_SECRET_KEY", "R2_BUCKET",
+               "R2_PUBLIC_BASE", "R2_FREE_BYTES", "R2_LIMIT_PERCENT")
+
+
+def _load_env_values() -> int:
+    """
+    Copy the R2 settings from .env into the environment. Returns how many were set.
+
+    Values already present in the environment are left alone, so an override still overrides.
+    Quoting is stripped and inline comments are not - .env is not shell syntax and a value with a
+    "#" in it is far more likely to be part of a key than a comment.
+    """
+    if not ENV_FILE.is_file():
+        return 0
+    loaded = 0
+    try:
+        text = ENV_FILE.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key not in R2_ENV_KEYS or key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip('"').strip("'")
+        loaded += 1
+    return loaded
+
+
+def r2_usage(*, force: bool = False) -> dict:
+    """
+    How full the R2 bucket is, against the free allowance.
+
+    Returns a dict with a "state" that is always present, so a caller cannot mistake "unknown" for
+    "zero": "ok", "unconfigured" or "error". The app shows the reason rather than a figure when it is
+    not ok, because a confident 0 GB when the bucket cannot be read is a lie a person would act on.
+    """
+    now = time.time()
+    cached = _r2_usage_cache.get("value")
+    if (not force and cached is not None
+            and now - _r2_usage_cache.get("at", 0.0) < R2_USAGE_TTL):
+        return cached
+
+    result = {"state": "error", "reason": ""}
+    try:
+        # **The panel never loads .env into the environment**, only reads it as text for the editor,
+        # and r2.r2_settings() reads os.environ. So the bucket the bot was uploading to reported as
+        # "unconfigured" here - both processes read the same file and only one was looking at it.
+        #
+        # Parsed rather than done with python-dotenv: this is the process that reports whether a
+        # dependency is missing, so it is the worst place to need one. An ImportError would surface
+        # as "cannot read the bucket" and send someone to look at Cloudflare.
+        #
+        # setdefault, so a value already in the environment still wins - which is how the bot's own
+        # launch and any manual override keep working.
+        _load_env_values()
+
+        # The bot's directory, so its module is found rather than a copy of the settings logic.
+        bot_dir = PROJECT / "bot"
+        if str(bot_dir) not in sys.path:
+            sys.path.insert(0, str(bot_dir))
+        import r2
+
+        settings = r2.r2_settings()
+        if settings is None:
+            result = {"state": "unconfigured", "reason": "R2 未設定"}
+        else:
+            used, count = r2.bucket_usage(settings, timeout=30.0)
+            free = r2.free_bytes()
+            cap = r2.limit_bytes()
+            percent = (used / free * 100) if free else 0.0
+            result = {
+                "state": "ok",
+                "reason": "",
+                "bucket": settings.bucket,
+                "public_base": settings.public_base,
+                "used": used,
+                "used_h": r2.format_bytes(used),
+                "objects": count,
+                "free": free,
+                "free_h": r2.format_bytes(free),
+                "limit": cap,
+                "limit_h": r2.format_bytes(cap),
+                "limit_percent": round(r2.limit_percent()),
+                "remaining": max(0, cap - used),
+                "remaining_h": r2.format_bytes(max(0, cap - used)),
+                "percent": round(percent, 1),
+                # What the operator actually needs to know at a glance.
+                "full": used >= cap,
+            }
+    except Exception as exc:  # noqa: BLE001
+        # Every failure is reported the same way: the panel says it cannot read it and why. A
+        # traceback here would take down the whole status endpoint, which is what the app polls to
+        # find out whether anything is wrong in the first place.
+        result = {"state": "error", "reason": f"{type(exc).__name__}: {exc}"}
+
+    _r2_usage_cache["at"] = now
+    _r2_usage_cache["value"] = result
+    return result
+
+
 def build_status(api_port: int) -> dict:
     bot_up, bot_pid, bot_how = bot_running()
     srv_up, srv_pid, srv_how = server_running(api_port)
@@ -495,6 +607,9 @@ def build_status(api_port: int) -> dict:
         "disk": disk_usage(PROJECT),
         "cache_bytes": cache_bytes,
         "cache_h": human(cache_bytes),
+        # How full the image host is. Cached for R2_USAGE_TTL, because the app polls this endpoint
+        # and a bucket listing per poll would be a round trip to Cloudflare every few seconds.
+        "r2": r2_usage(),
         "log": {
             "path": str(LOG_FILE),
             "size": LOG_FILE.stat().st_size if LOG_FILE.is_file() else 0,
