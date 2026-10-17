@@ -275,8 +275,24 @@ if ($Create) {
 
     if (-not $tagExists) {
         Info "creating tag $tag at $($head.Substring(0,8))"
-        & git -C $ProjectDir tag -a $tag -m "Release $tag" 2>&1 | Out-Null
-        & git -C $ProjectDir push origin $tag 2>&1 | Select-Object -Last 1 | ForEach-Object { Info $_ }
+        # **Both calls go through cmd, and that is not decoration.**
+        #
+        # $ErrorActionPreference is "Stop" at the top of this file, and PowerShell treats anything a
+        # native program writes to stderr as a terminating error. git writes its progress there -
+        # "To https://github.com/..." is the first line of a successful push - so the push succeeded
+        # and the script died on the very next statement, before creating the release. The tag was on
+        # GitHub and no release existed, which looks like the opposite of what happened.
+        #
+        # cmd /c gives a plain exit code and no stderr redirection, which is the same fix keytool and
+        # apksigner needed in build.ps1.
+        $null = cmd /c "git -C `"$ProjectDir`" tag -a $tag -m `"Release $tag`" 2>&1"
+        $pushOutput = cmd /c "git -C `"$ProjectDir`" push origin $tag 2>&1"
+        if ($LASTEXITCODE -ne 0) {
+            Bad "pushing tag $tag failed:"
+            $pushOutput | ForEach-Object { Warn "  $_" }
+            exit 1
+        }
+        Info "tag $tag pushed"
     } else {
         Info "tag $tag already exists; reusing it"
     }
