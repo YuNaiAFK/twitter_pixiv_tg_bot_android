@@ -5782,6 +5782,16 @@ async def run_regenerate(query, user, entry: dict) -> None:
         # a regenerated page would be broken again on every page.
         embed = await public_embed_urls(embed, gallery, query.message)
 
+        # **And the same R2 host as publishing, which this path was missing.**
+        #
+        # Without it the page was rebuilt with freshly swept hath.network links: they work, and
+        # they expire, so the page broke again hours later and the button only ever bought time.
+        # The first R2 change routed only the publishing path, and this is the other one.
+        #
+        # It costs nothing when the images are already uploaded - the key is a content hash, so
+        # host_on_r2 returns the recorded URLs without reading anything over the network.
+        embed = await host_on_r2(embed, gallery, mode, query.message)
+
         # **Edit the existing page, so the URL does not change.**
         #
         # Regenerating exists because e-hentai's image URLs expire and the embedded images stop
