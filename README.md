@@ -646,6 +646,8 @@ proot-distro、Python 函式庫、TDLib、Android 建置工具 —— 附上各�
 | httpx | <https://github.com/encode/httpx> |
 | Pillow | <https://github.com/python-pillow/Pillow> |
 | Cloudflare R2（boto3） | <https://developers.cloudflare.com/r2/> · <https://github.com/boto/boto3> |
+| **EhTagTranslation/Database** | <https://github.com/EhTagTranslation/Database> |
+| **OpenCC** | <https://github.com/BYVoid/OpenCC> |
 | Telegram Bot API server | <https://github.com/tdlib/telegram-bot-api> |
 | TDLib | <https://github.com/tdlib/td> |
 | proot-distro | <https://github.com/termux/proot-distro> |
@@ -653,6 +655,12 @@ proot-distro、Python 函式庫、TDLib、Android 建置工具 —— 附上各�
 | Eclipse Temurin JDK | <https://adoptium.net> |
 
 **除了 `apk/` 裡的 APK 之外，這裡沒有任何東西是打包進來的**，本專案也不隸屬於上述任何專案。
+
+> **`bot/tag_translations.py` 是衍生作品，授權為 CC BY-NC-SA 3.0**，不是本專案自己的條款。
+> 它由 [`tools/build_tag_translations.py`](tools/build_tag_translations.py) 從 EhTagTranslation 資料庫產生
+> （14,206 筆），上游文本本身又是 EHWiki 標籤頁面的翻譯，以相同授權再散布。
+>
+> **非商業條款正是它與個人使用相容、與拿來收費不相容的原因。** 如果你要商業使用，該看的就是那個檔案。
 
 ---
 

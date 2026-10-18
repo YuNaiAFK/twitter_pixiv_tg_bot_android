@@ -65,6 +65,38 @@ Installed with `pip` into Termux's Python.
 `gallery-dl` is GPLv2. This project does not redistribute it - `pip install` fetches it from PyPI -
 but if you redistribute a bundled build, that licence applies to it.
 
+## Tag translation data
+
+| project | page | what it does here |
+| --- | --- | --- |
+| **EhTagTranslation/Database** | <https://github.com/EhTagTranslation/Database> | the 14,206-entry tag dictionary behind `bot/tag_translations.py` |
+| **OpenCC** | <https://github.com/BYVoid/OpenCC> | Simplified to Traditional conversion, `s2twp` |
+| **EHWiki** | <https://ehwiki.org> | the tag documentation that database translates |
+
+**`bot/tag_translations.py` is a derived work and is licensed CC BY-NC-SA 3.0**, not under this
+project's own terms. It is generated from the EhTagTranslation database by
+[`tools/build_tag_translations.py`](tools/build_tag_translations.py); the upstream text is itself a
+translation of EHWiki's tag pages, redistributed under the same licence and carrying the GNU Free
+Documentation License for the descriptive text.
+
+The non-commercial clause is what makes this compatible with a personal bot and incompatible with
+selling access to it. If you run this commercially, that file is the one to look at.
+
+**Two things the builder does that a text editor cannot**, both of which matter for what a reader
+sees:
+
+- converts Simplified to Traditional with OpenCC's ``s2twp`` rather than ``s2t``. Character mapping
+  alone leaves ``打印机`` as 打印機 instead of 印表機 - vocabulary is part of a translation, not just
+  characters.
+- resolves the namespace conflict. The same raw name appears in several namespaces with different
+  meanings: ``angel`` is 天使 as a female tag and 安吉爾 as a character, ``akagi`` is a kanmusu and
+  also a surname. The bot looks a tag up by value alone, so one has to win - and it should be the
+  descriptive tag, which appears on galleries of every kind, not a character name that happens to
+  share the spelling.
+
+**`artist` and `group` are deliberately not included.** They are 30,000 entries whose "translation" is
+the Chinese spelling of a pen name - longer than the Roman one and not what anyone searches by.
+
 ## The self-hosted Bot API server
 
 | project | page | what it does here |
