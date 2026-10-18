@@ -50,6 +50,7 @@ from telegram.ext import (
     filters,
 )
 import ehentai
+from tag_translations import translate_tag
 
 # Resolve .env beside this file, not beside the shell's current directory, so the
 # bot finds its credentials regardless of where a launcher starts it.
@@ -337,6 +338,33 @@ ARCHIVE_DEADLINE_SECONDS = env_number("ARCHIVE_DEADLINE_SECONDS", 5 * 60)
 # e-hentai's own namespace display names, overridable so a Chinese-only page can
 # be produced without editing the module.
 EHENTAI_NAMESPACE_LABELS = ehentai.NAMESPACE_LABELS
+
+# The chat message's own order and labels.
+#
+# **Deliberately not NAMESPACE_ORDER.** That one is shared with the Telegraph page and puts artist
+# second; this message puts 原作 and 角色 before it, because that is the order the format asked for.
+# Reusing the shared constant would have rearranged the page too, which nobody asked for.
+GALLERY_INFO_ORDER = [
+    "language", "parody", "character", "artist", "group",
+    "female", "male", "mixed", "other", "cosplayer", "reclass", "temp",
+]
+
+# Traditional Chinese only - no "語言 / Language". The chat message is read at a glance, and a second
+# label on every line is noise when the first one already says what it is.
+GALLERY_INFO_LABELS = {
+    "language": "語言",
+    "parody": "原作",
+    "character": "角色",
+    "artist": "藝術家",
+    "group": "社團",
+    "female": "女性",
+    "male": "男性",
+    "mixed": "混合",
+    "other": "其他",
+    "cosplayer": "Cosplayer",
+    "reclass": "重新分類",
+    "temp": "暫存",
+}
 
 # -------------------- Supported sites --------------------
 #
@@ -5586,34 +5614,42 @@ def gallery_url(text: str) -> str | None:
 
 def build_gallery_info(gallery, telegraph_url: str = "") -> str:
     """
-    Chat-side summary of a gallery, with every tag grouped by namespace.
+    The chat-side summary of a gallery: its tags by namespace, then title, source and rating.
 
-    The Telegraph page is the full presentation; this is what a chat can show, so
-    it keeps the facts and the grouped tags and omits the images.
+    Two presentation decisions worth knowing:
+
+    **Translated rather than bilingual.** A tag renders as `#獸耳`, not `#獸耳（animal ears）`. In a
+    line of ten tags the parenthetical doubles the length and makes the line hard to scan, and the
+    Roman form is only wanted when searching by it - which is what the source link below is for.
+
+    **Hashtag-shaped.** Every value gets a `#` and spaces become underscores, so a multi-word tag
+    stays one token. Translated tags rarely contain a space; the ones that do were never going to be
+    Chinese anyway.
     """
-    lines = [f"📚 {gallery.title}"]
+    lines = []
 
-    facts = []
-    if gallery.category:
-        facts.append(f"分類 {gallery.category}")
-    if gallery.language:
-        facts.append(f"語言 {gallery.language}")
+    for namespace in GALLERY_INFO_ORDER:
+        values = gallery.tags.get(namespace) or []
+        if not values:
+            continue
+        label = GALLERY_INFO_LABELS.get(namespace, namespace)
+        rendered = " ".join(
+            "#" + translate_tag(value).replace(" ", "_") for value in values
+        )
+        lines.append(f"{label}: {rendered}")
+
+    if gallery.title:
+        lines.append(f"預覽: {gallery.title}")
+
+    # The URL the sender used rather than the normalised page_url, so an exhentai link stays an
+    # exhentai link - that is the address they can open with the cookies the bot already has.
+    source = gallery.url or gallery.page_url
+    if source:
+        lines.append("原始地址:")
+        lines.append(source)
+
     if gallery.rating:
-        facts.append(f"評分 {gallery.rating}")
-    if gallery.filecount:
-        facts.append(f"{gallery.filecount} 頁")
-    if gallery.filesize:
-        facts.append(ehentai.format_filesize(gallery.filesize))
-    if facts:
-        lines.append("　".join(facts))
-
-    for namespace in gallery.ordered_namespaces():
-        label = EHENTAI_NAMESPACE_LABELS.get(namespace, namespace)
-        values = gallery.tags.get(namespace, [])
-        if values:
-            lines.append(
-                f"• {label}：{', '.join(ehentai.display_tag(v) for v in values)}"
-            )
+        lines.append(f"評分: {gallery.rating}")
 
     if gallery.expunged:
         lines.append("⚠ 此畫廊已被刪除（expunged）")
