@@ -5665,12 +5665,16 @@ def build_gallery_info(gallery, telegraph_url: str = "", *, html: bool = False) 
         title = out(gallery.title)
         if html and telegraph_url:
             # The href needs its quotes escaped too - a URL with a quote in it would end the
-            # attribute early. Gallery titles reach an href far more often than URLs do, but the
-            # rule is the same and it costs nothing.
+            # attribute early.
             href = escape_html(telegraph_url).replace('"', "&quot;")
             lines.append(f'預覽: <a href="{href}">{title}</a>')
         else:
-            lines.append(f"預覽: {title}")
+            # **"名稱", not "預覽", when there is no page yet.**
+            #
+            # The first reply is a menu: nothing has been published, so there is nothing to preview
+            # and the title is not a link. Calling that line 預覽 promises a page that does not
+            # exist and reads as a link that failed to work.
+            lines.append(f"名稱: {title}")
 
     # The URL the sender used rather than the normalised page_url, so an exhentai link stays an
     # exhentai link - that is the address they can open with the cookies the bot already has.
