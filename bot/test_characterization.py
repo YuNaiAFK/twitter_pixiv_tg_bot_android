@@ -2437,7 +2437,11 @@ class _GalleryImagesHarness:
             harness.texts.append(text)
             return True
 
-        async def fake_edit_cover(status, gallery, summary, keyboard=None):
+        # parse_mode is a real argument of the function being replaced, so the double has to accept
+        # it. It refused on the first run after the preview line became a link, which is the useful
+        # direction for this kind of stub to fail in: a **kwargs double would have accepted anything
+        # and the argument would never have been checked against the real signature.
+        async def fake_edit_cover(status, gallery, summary, keyboard=None, parse_mode=None):
             harness.texts.append(summary)
             return True
 

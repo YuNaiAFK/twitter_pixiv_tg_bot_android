@@ -1500,7 +1500,8 @@ def remember_media_parse(url: str, files: list[Path]) -> None:
 
 
 async def update_result_message(message, text: str, *, reply_markup=None,
-                                link_preview: bool = True) -> bool:
+                                link_preview: bool = True,
+                                parse_mode=None) -> bool:
     """
     Replace a result message's text, whether or not it currently holds a photo.
 
@@ -1531,6 +1532,8 @@ async def update_result_message(message, text: str, *, reply_markup=None,
     common = {}
     if reply_markup is not None:
         common["reply_markup"] = reply_markup
+    if parse_mode is not None:
+        common["parse_mode"] = parse_mode
     text_kwargs = dict(common)
     if link_preview:
         text_kwargs["link_preview_options"] = source_link_options()
@@ -5108,7 +5111,7 @@ def public_thumbnail_url(thumb: str) -> str:
 
 
 async def edit_message_to_cover(status, gallery, caption: str,
-                                reply_markup=None) -> bool:
+                                reply_markup=None, parse_mode=None) -> bool:
     """
     Turn the status message into the gallery's cover photo. Returns success.
 
@@ -5144,7 +5147,8 @@ async def edit_message_to_cover(status, gallery, caption: str,
         return False
     try:
         await status.edit_media(
-            media=InputMediaPhoto(media=url, caption=caption or None),
+            media=InputMediaPhoto(media=url, caption=caption or None,
+                                  parse_mode=parse_mode),
             reply_markup=reply_markup,
         )
         return True
@@ -5612,11 +5616,22 @@ def gallery_url(text: str) -> str | None:
     return None
 
 
-def build_gallery_info(gallery, telegraph_url: str = "") -> str:
+def escape_html(text: str) -> str:
+    """
+    Escape the three characters Telegram's HTML parser treats as markup.
+
+    Quotes are not escaped: this is used for element content, and an escaped quote in a gallery title
+    would show as `&quot;` if the string ever reached a path that does not parse it. The one place a
+    quote matters - the href attribute - escapes its own value.
+    """
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def build_gallery_info(gallery, telegraph_url: str = "", *, html: bool = False) -> str:
     """
     The chat-side summary of a gallery: its tags by namespace, then title, source and rating.
 
-    Two presentation decisions worth knowing:
+    Three presentation decisions worth knowing:
 
     **Translated rather than bilingual.** A tag renders as `#獸耳`, not `#獸耳（animal ears）`. In a
     line of ten tags the parenthetical doubles the length and makes the line hard to scan, and the
@@ -5625,7 +5640,15 @@ def build_gallery_info(gallery, telegraph_url: str = "") -> str:
     **Hashtag-shaped.** Every value gets a `#` and spaces become underscores, so a multi-word tag
     stays one token. Translated tags rarely contain a space; the ones that do were never going to be
     Chinese anyway.
+
+    **The title links to the Telegraph page when there is one**, so the page does not need a line of
+    its own. ``html`` must be true for that to be anything but literal text, and when it is, every
+    field here is escaped - a title holding "&" or "<" would otherwise make Telegram reject the whole
+    message.
     """
+    def out(text: str) -> str:
+        return escape_html(text) if html else text
+
     lines = []
 
     for namespace in GALLERY_INFO_ORDER:
@@ -5634,22 +5657,30 @@ def build_gallery_info(gallery, telegraph_url: str = "") -> str:
             continue
         label = GALLERY_INFO_LABELS.get(namespace, namespace)
         rendered = " ".join(
-            "#" + translate_tag(value).replace(" ", "_") for value in values
+            "#" + out(translate_tag(value).replace(" ", "_")) for value in values
         )
         lines.append(f"{label}: {rendered}")
 
     if gallery.title:
-        lines.append(f"預覽: {gallery.title}")
+        title = out(gallery.title)
+        if html and telegraph_url:
+            # The href needs its quotes escaped too - a URL with a quote in it would end the
+            # attribute early. Gallery titles reach an href far more often than URLs do, but the
+            # rule is the same and it costs nothing.
+            href = escape_html(telegraph_url).replace('"', "&quot;")
+            lines.append(f'預覽: <a href="{href}">{title}</a>')
+        else:
+            lines.append(f"預覽: {title}")
 
     # The URL the sender used rather than the normalised page_url, so an exhentai link stays an
     # exhentai link - that is the address they can open with the cookies the bot already has.
     source = gallery.url or gallery.page_url
     if source:
         lines.append("原始地址:")
-        lines.append(source)
+        lines.append(out(source))
 
     if gallery.rating:
-        lines.append(f"評分: {gallery.rating}")
+        lines.append(f"評分: {out(gallery.rating)}")
 
     if gallery.expunged:
         lines.append("⚠ 此畫廊已被刪除（expunged）")
@@ -5887,8 +5918,8 @@ async def run_regenerate(query, user, entry: dict) -> None:
     # update_result_message: edit_text on a photo message fails with "There is no text in
     # the message to edit", and that made every 重新生成 press log a failure and post a
     # second copy instead of updating the picture in place.
-    text_lines = [build_gallery_info(gallery)]
-    text_lines.append(f"\n📄 Telegraph：{telegraph_url}")
+    # The title carries the link, so there is no separate Telegraph line to add.
+    text_lines = [build_gallery_info(gallery, telegraph_url, html=True)]
     if regenerated_link_changed:
         text_lines.append("（已重新生成，但這次建立了新頁面，網址與原本不同，內嵌 "
                           f"{len(embed)} 頁圖片）")
@@ -5900,7 +5931,7 @@ async def run_regenerate(query, user, entry: dict) -> None:
 
     new_text = "\n".join(text_lines)
     if await update_result_message(
-            query.message, new_text,
+            query.message, new_text, parse_mode="HTML",
             reply_markup=regenerate_keyboard(gallery.gid, gallery.token)):
         return
     # Nothing editable - a photo with no caption, or a refusal. A second message is worse
@@ -6544,25 +6575,30 @@ async def run_gallery_images(message, status, gallery, mode: str,
 
     telegraph_url = telegraph_page.url if telegraph_page is not None else ""
 
-    summary_lines = [build_gallery_info(gallery)]
+    # The title links to the page, so the separate Telegraph line is gone. What it used to say -
+    # how many pages, whether the page was reused, whether its images had to be repaired - is worth
+    # keeping, so it moves to one short line rather than disappearing.
+    summary_lines = [build_gallery_info(gallery, telegraph_url, html=True)]
     if telegraph_url:
+        detail = ""
         if reuse_page is not None:
-            summary_lines.append(
-                f"\n📄 Telegraph（先前已建立，圖片仍可載入，內嵌 "
-                f"{cached_entry.get('count') or len(embed)} 頁圖片）：{telegraph_url}")
+            detail = "先前已建立，圖片仍可載入"
         elif repaired:
-            reason = ""
+            # "網址不變" is not decoration: repairing exists so that a shared link keeps working, and
+            # a reader who cannot tell whether the address changed has no way to know the link they
+            # sent someone still resolves. A test asserts it, which is how this line was caught.
+            detail = "已修復圖片"
             if damage is not None and damage.broken:
-                first = damage.broken[0]
-                reason = f"，偵測到 {len(damage.broken)} 張載入失敗（{first.reason}）"
-            summary_lines.append(
-                f"\n📄 Telegraph（已修復圖片{reason}，網址不變，內嵌 "
-                f"{len(embed)} 頁圖片）：{telegraph_url}")
+                detail += f"（{len(damage.broken)} 張載入失敗）"
+            detail += "，網址不變"
+        pages = cached_entry.get("count") if reuse_page is not None else None
+        count = pages or len(embed)
+        if detail:
+            summary_lines.append(f"（{detail}，內嵌 {count} 頁圖片）")
         else:
-            summary_lines.append(
-                f"\n📄 Telegraph（內嵌 {len(embed)} 頁圖片）：{telegraph_url}")
+            summary_lines.append(f"（內嵌 {count} 頁圖片）")
     if telegraph_note:
-        summary_lines.append(f"\n{telegraph_note}")
+        summary_lines.append(f"\n{escape_html(telegraph_note)}")
     summary = "\n".join(summary_lines)
 
     # Remember this so the page can be re-signed later: e-hentai's image links
@@ -6576,11 +6612,11 @@ async def run_gallery_images(message, status, gallery, mode: str,
     # source link either way.
     keyboard = (regenerate_keyboard(gallery.gid, gallery.token)
                 if telegraph_url else None)
-    if await edit_message_to_cover(status, gallery, summary, keyboard):
+    if await edit_message_to_cover(status, gallery, summary, keyboard, parse_mode="HTML"):
         return
 
     await status.edit_text(
-        summary,
+        summary, parse_mode="HTML",
         link_preview_options=source_link_options(),
         reply_markup=keyboard,
     )
