@@ -3388,6 +3388,71 @@ def _pillow_is_restricted_to_safe_formats() -> bool:
     return True
 
 
+def _the_audit_command_reports_correctly() -> bool:
+    """
+    /audit must render a clean result as clean, and an unclean one with the version to upgrade to.
+
+    Tested on the pure functions rather than by calling OSV: the network answers differently every
+    month, so a test that asserted "no findings" would fail the day a dependency broke - and a test
+    that asserted findings would pass for the wrong reason. What is stable is the rendering.
+    """
+    import inspect
+
+    # 1. Nothing found reads as nothing found, and does not imply a failure.
+    clean = bot.format_audit_report({"total": 21, "findings": [], "error": ""})
+    if "沒有發現已知漏洞" not in clean:
+        note(f"a clean result does not say so: {clean!r}")
+        return False
+    if "發現" in clean and "個已知漏洞：" in clean:
+        note("a clean result looks like it found something")
+        return False
+
+    # 2. An error must never read as clean - that is the one mistake that matters here.
+    broken = bot.format_audit_report({"total": 21, "findings": [], "error": "TimeoutException: x"})
+    if "沒有發現已知漏洞" in broken:
+        note("a failed check reports as clean, which is the dangerous direction")
+        return False
+    if "查不到" not in broken and "無法" not in broken:
+        note(f"a failed check does not say it failed: {broken!r}")
+        return False
+
+    # 3. A finding names the package, the fixed version, and the command to run.
+    found = bot.format_audit_report({"total": 21, "error": "", "findings": [
+        {"package": "pillow", "version": "12.3.0",
+         "vulns": [{"id": "CVE-2026-1", "summary": "", "fixed": "13.0.0"},
+                   {"id": "CVE-2026-2", "summary": "", "fixed": "13.0.0"},
+                   {"id": "CVE-2026-3", "summary": "", "fixed": "13.0.0"},
+                   {"id": "CVE-2026-4", "summary": "", "fixed": "13.0.0"}]},
+    ]})
+    for required in ("pillow", "12.3.0", "13.0.0", "4 個", "pip install"):
+        if required not in found:
+            note(f"the report omits {required!r}: {found!r}")
+            return False
+    if "CVE-2026-4" in found and "等 4 個" not in found:
+        note("all four ids were listed; only three plus a count fit the length limit")
+        return False
+
+    # 4. It reads the real package list rather than a hard-coded one.
+    packages = bot.installed_packages()
+    if len(packages) < 5:
+        note(f"installed_packages returned {len(packages)} entries, which cannot be right")
+        return False
+    names = [name for name, _ in packages]
+    if "python-telegram-bot" not in names and not any("telegram" in n for n in names):
+        note("the package list does not include the bot library")
+        return False
+
+    # 5. And it is registered as an administrator command, not a visitor one.
+    source = inspect.getsource(bot)
+    if 'CommandHandler("audit"' not in source:
+        note("/audit is not registered")
+        return False
+    if 'CommandHandler("audit", admin_only(' not in source:
+        note("/audit is registered without admin_only, so any group member could run it")
+        return False
+    return True
+
+
 def _result_message_helper_works() -> bool:
     """
     update_result_message must edit a caption on a photo and text on a text message.
@@ -3879,8 +3944,8 @@ print("=== 2. Public surface: commands ===")
 # Every command that existed must still be registered. A dropped CommandHandler is
 # invisible until someone tries the command.
 EXPECTED_COMMANDS = {
-    "authorized", "blocked", "cache", "cookies", "demote", "grant", "help", "id",
-    "lock", "lockgroup", "promote", "restart", "revoke", "start", "status",
+    "audit", "authorized", "blocked", "cache", "cookies", "demote", "grant", "help",
+    "id", "lock", "lockgroup", "promote", "restart", "revoke", "start", "status",
 }
 _found = set()
 for _node in ast.walk(_TREE):
@@ -5469,6 +5534,10 @@ check("host_on_r2 passes the ceiling and the current usage to the uploader",
 check("Pillow is restricted to safe image formats",
       _pillow_is_restricted_to_safe_formats(),
       "an attacker-supplied file disguised as .jpg would otherwise reach the EPS/XBM/PDF decoders")
+
+check("/audit renders clean, failed and vulnerable results distinctly",
+      _the_audit_command_reports_correctly(),
+      "a failed check that reads as clean is the one mistake that matters here")
 
 check("the regenerate path can update a photo message",
       _result_message_helper_works(),
