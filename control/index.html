@@ -275,14 +275,20 @@ async function refreshStatus() {
               s.server.running ? "執行中" : "已停止",
               s.server.running ? `pid ${s.server.pid}（${s.server.how}）` : s.server.how);
 
-    if (!s.proxy.configured) {
-      setStatus("pxy", "off", "未設定", "~/.proxy-url 不存在");
-    } else if (s.proxy.listening) {
-      setStatus("pxy", "on", "可用", s.proxy.url);
+    // Three states, not two. "tun" is a *working* VPN and must not be red: the tunnel redirects
+    // every packet, so nothing needs a proxy - and setting one would break it.
+    const pxy = s.proxy || {};
+    if (pxy.mode === "proxy") {
+      setStatus("pxy", "on", "可用", "代理 " + pxy.url);
+    } else if (pxy.mode === "tun") {
+      setStatus("pxy", "on", "可用", (pxy.tun || "VPN") + " 隧道模式，流量已自動導向");
+    } else if (pxy.mode === "none") {
+      setStatus("pxy", "warn", "無回應", "找不到 VPN 隧道，也沒有代理埠（請確認 FlClash／v2rayNG）");
+    } else if (!pxy.configured) {
+      // A panel from before this field existed.
+      setStatus("pxy", "off", "未知", "面板版本過舊，請更新");
     } else {
-      // Worth flagging loudly: with the VPN down the bot looks broken while being fine, and
-      // every download fails.
-      setStatus("pxy", "warn", "無回應", s.proxy.url + "（請確認 v2rayNG）");
+      setStatus("pxy", "warn", "無回應", pxy.url + "");
     }
 
     $("disk-text").textContent = s.disk.free_h ? s.disk.free_h + " 可用" : "—";

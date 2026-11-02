@@ -274,18 +274,79 @@ def dir_size(path: Path) -> int:
     return total
 
 
+# Interfaces a VPN creates on Android. v2rayNG and FlClash both use tunN; older setups used ppp.
+_TUN_PREFIXES = ("tun", "utun", "ppp", "wg")
+
+
+# Cached for the same reason the proxy probe is: the app polls every few seconds, and this runs a
+# subprocess. Long enough that polling is free, short enough that connecting the VPN shows up while the
+# person is still looking at the card.
+_VPN_CHECK_TTL = 30.0
+_vpn_state = {"name": "", "at": 0.0, "detail": ""}
+
+
+def vpn_interface() -> tuple:
+    """
+    (interface name, address) for an active VPN tunnel, or ("", "").
+
+    **`ifconfig -a`, and not /sys/class/net.** Measured on the phone: every file that would normally
+    answer this is denied to u:r:untrusted_app_27, which is the domain the panel and every
+    RUN_COMMAND script run in:
+
+        /sys/class/net     PermissionError
+        /proc/net/dev      PermissionError
+        /proc/net/route    PermissionError
+        socket.if_nameindex()  PermissionError
+
+    `ifconfig` ships with Termux and asks the kernel through ioctl instead of those files, so it works
+    there - it even warns "cannot open /proc/net/dev (Permission denied). Limited output" and then
+    lists tun0 correctly anyway.
+
+    **This is the check the old code was missing.** It only knew about ~/.proxy-url, so a phone on
+    FlClash in TUN mode - where the network works and no proxy port exists - looked like a phone with
+    no VPN at all, in red.
+    """
+    now = time.monotonic()
+    if now - _vpn_state["at"] < _VPN_CHECK_TTL:
+        return _vpn_state["name"], _vpn_state["detail"]
+
+    name = ""
+    detail = ""
+    try:
+        # -a so a down interface is still listed; tun interfaces report UP while connected.
+        output = subprocess.run(["ifconfig", "-a"], capture_output=True, text=True,
+                                timeout=5, check=False).stdout
+    except (OSError, subprocess.SubprocessError):
+        output = ""
+
+    current = ""
+    for line in output.splitlines():
+        if line and not line[0].isspace() and ":" in line:
+            current = line.split(":", 1)[0].strip()
+        elif current and not name and current.startswith(_TUN_PREFIXES):
+            name = current
+            stripped = line.strip()
+            if stripped.startswith("inet "):
+                detail = stripped.split()[1]
+
+    _vpn_state.update({"name": name, "detail": detail, "at": now})
+    return name, detail
+
+
 def proxy_state() -> dict:
     """
-    Whether the VPN is reachable.
+    How this phone currently reaches the internet: "proxy", "tun" or "none".
 
-    Worth showing prominently: every download needs it, and when it is down the bot looks broken
-    while actually being fine. `~/.proxy-url` is where the bootstrap records it.
+    Worth showing prominently: every download needs it, and when it is genuinely down the bot looks
+    broken while actually being fine. But two of the three states are *working* ones, and the old
+    version could only express one of them - which turned a healthy TUN setup into a red 未設定.
     """
     url = ""
     try:
         url = (Path(os.path.expanduser("~")) / ".proxy-url").read_text(encoding="utf-8").strip()
     except OSError:
         pass
+
     listening = False
     if url:
         match = re.search(r"://(?:\[)?([^\]]+?)(?:\])?:(\d+)", url)
@@ -295,7 +356,26 @@ def proxy_state() -> dict:
                 listening = port_listening(port)
             else:
                 listening = port_listening(port)  # best effort
-    return {"url": url, "listening": listening, "configured": bool(url)}
+
+    tun, tun_detail = vpn_interface()
+    if listening:
+        mode = "proxy"
+    elif tun:
+        mode = "tun"
+    else:
+        mode = "none"
+
+    return {
+        "url": url,
+        "listening": listening,
+        # Kept for an older app build that only knows these two fields.
+        "configured": bool(url),
+        "mode": mode,
+        "tun": tun,
+        "tun_address": tun_detail,
+        # The one thing the card needs to decide its colour.
+        "ok": mode in {"proxy", "tun"},
+    }
 
 
 def read_env() -> dict:

@@ -766,6 +766,10 @@ public class MainActivity extends Activity {
                 final boolean pxyOk = pxy.optBoolean("listening");
                 final boolean pxySet = pxy.optBoolean("configured");
                 final String pxyUrl = pxy.optString("url", "");
+                // Three states, not two. "tun" is a *working* VPN and must not be red: the tunnel
+                // redirects every packet, so nothing needs a proxy - and setting one would break it.
+                final String pxyMode = pxy.optString("mode", "");
+                final String pxyTun = pxy.optString("tun", "");
                 final String free = s.optJSONObject("disk") == null ? "—"
                         : s.getJSONObject("disk").optString("free_h", "—");
                 final String cache = s.optString("cache_h", "—");
@@ -801,18 +805,31 @@ public class MainActivity extends Activity {
                     srvValue.setTextColor(Color.parseColor(srvUp ? "#35c07a" : "#e5534b"));
                     srvDetail.setText(srvUp ? srvHow : srvHow);
 
-                    if (!pxySet) {
-                        pxyValue.setText("未設定");
-                        pxyValue.setTextColor(Color.parseColor("#e5534b"));
-                    } else if (pxyOk) {
+                    if ("proxy".equals(pxyMode)) {
                         pxyValue.setText("可用");
                         pxyValue.setTextColor(Color.parseColor("#35c07a"));
-                    } else {
-                        // The failure that looks like a broken bot while the bot is fine.
+                        pxyDetail.setText("代理 " + pxyUrl);
+                    } else if ("tun".equals(pxyMode)) {
+                        pxyValue.setText("可用");
+                        pxyValue.setTextColor(Color.parseColor("#35c07a"));
+                        pxyDetail.setText((pxyTun.isEmpty() ? "VPN" : pxyTun)
+                                + " 隧道模式，流量已自動導向");
+                    } else if ("none".equals(pxyMode)) {
+                        // The failure that looks like a broken bot while the bot is fine - and the
+                        // only state that deserves the warning colour.
                         pxyValue.setText("無回應");
                         pxyValue.setTextColor(Color.parseColor("#e8b23a"));
+                        pxyDetail.setText("找不到 VPN 隧道，也沒有代理埠");
+                    } else if (!pxySet) {
+                        // A panel from before this field existed.
+                        pxyValue.setText("未知");
+                        pxyValue.setTextColor(Color.parseColor("#e8b23a"));
+                        pxyDetail.setText("面板版本過舊，請更新");
+                    } else {
+                        pxyValue.setText("無回應");
+                        pxyValue.setTextColor(Color.parseColor("#e8b23a"));
+                        pxyDetail.setText(pxyUrl.isEmpty() ? "—" : pxyUrl);
                     }
-                    pxyDetail.setText(pxyUrl.isEmpty() ? "—" : pxyUrl);
 
                     diskValue.setText(free + " 可用");
                     diskValue.setTextColor(Color.parseColor("#e6e9ef"));
