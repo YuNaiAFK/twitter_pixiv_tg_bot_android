@@ -3662,6 +3662,48 @@ def _stale_gallery_facts_are_refreshed() -> bool:
     return True
 
 
+def _gallery_cache_can_be_switched_off() -> bool:
+    """
+    GALLERY_CACHE=0 must stop both the read and the write, or it does nothing at all.
+
+    Off is a real trade rather than a saving: the entry is kilobytes, and what it holds besides the
+    tags is the Telegraph page URL - which is what makes a re-parse reuse the page instead of
+    publishing a second one. So the check is that the switch works, not that off is better.
+    """
+    import importlib
+    import os
+
+    saved = os.environ.get("GALLERY_CACHE")
+    try:
+        os.environ["GALLERY_CACHE"] = "0"
+        importlib.reload(bot)
+        if bot.GALLERY_CACHE_ENABLED:
+            note("GALLERY_CACHE=0 did not disable it")
+            return False
+        if bot.gallery_cache_lookup("https://e-hentai.org/g/1/abc"):
+            note("a lookup still returned a payload while the cache was off")
+            return False
+
+        # The write must be skipped too, or the entry is rebuilt immediately and the switch is inert.
+        class FakeGallery:
+            page_url = "https://e-hentai.org/g/1/abc"
+            gid = "1"
+            token = "abc"
+
+        before = len(bot.PARSE_CACHE.entries)
+        bot.remember_gallery("https://e-hentai.org/g/1/abc", FakeGallery())
+        if len(bot.PARSE_CACHE.entries) != before:
+            note("remember_gallery still wrote an entry while the cache was off")
+            return False
+        return True
+    finally:
+        if saved is None:
+            os.environ.pop("GALLERY_CACHE", None)
+        else:
+            os.environ["GALLERY_CACHE"] = saved
+        importlib.reload(bot)
+
+
 def _result_message_helper_works() -> bool:
     """
     update_result_message must edit a caption on a photo and text on a text message.
@@ -5780,6 +5822,10 @@ check("the sweep and the R2 upload are stoppable",
 check("stale tags and title are re-read without re-sweeping",
       _stale_gallery_facts_are_refreshed(),
       "the whole payload was cached for 14 days, so edited tags never appeared")
+
+check("GALLERY_CACHE=0 stops both the read and the write",
+      _gallery_cache_can_be_switched_off(),
+      "a switch that only suppressed reads would be inert, because the write rebuilds the entry")
 
 check("the regenerate path can update a photo message",
       _result_message_helper_works(),
