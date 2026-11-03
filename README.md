@@ -1,119 +1,144 @@
 # twitter_pixiv_tg_bot — Android
 
-與 Windows 專案相同的 Telegram 解析機器人，但改成跑在** Android 手機**上而不是電腦。
-傳給它 X/Twitter、Pixiv 或 e-hentai 的連結，它會回傳媒體檔案。
+把 X/Twitter、Pixiv 與 e-hentai 的連結變成可直接瀏覽的媒體，跑在**你的手機**上。
 
-本專案在**已 root 的 OnePlus 8 Pro（Pixel Experience 13，AOSP 13，aarch64）**上開發，
-但程式碼本身沒有任何一處綁定這台裝置。
+在 Telegram 傳一個連結給它，它回傳檔案；e-hentai 的畫廊會被整理成一頁可以滑的
+Telegraph 頁面，圖片託管在 Cloudflare R2，所以那些簽章網址過期之後頁面也不會壞掉。
+
+**在已 root 的 OnePlus 8 Pro（Pixel Experience 13，AOSP 13，aarch64）上開發**，
+但程式碼本身沒有任何一處綁定這台裝置 —— 探測腳本會告訴你另一台手機能不能跑。
 
 ---
 
 ## 目錄
 
-- [這是獨立專案](#這是獨立專案)
-- [功能與平台差異](#功能與平台差異)
-- [部署](#部署)
-  - [0. 先跑探測腳本](#0-先跑探測腳本)
-  - [1. 安裝](#1-安裝)
-  - [2. 設定](#2-設定)
-  - [3. 執行](#3-執行)
-- [Android 特有的兩個問題](#android-特有的兩個問題)
-- [關於 2000 MB 上傳上限](#關於-2000-mb-上傳上限)
-- [代理的格式比看起來重要](#代理的格式比看起來重要)
-- [自架 Bot API 伺服器](#自架-bot-api-伺服器)
+**開始使用**
+- [這是什麼](#這是什麼)
+- [功能](#功能)
+- [快速開始](#快速開始)
+- [手機 App](#手機-app)
 - [控制面板](#控制面板)
-- [Android 控制 App](#android-控制-app)
-- [必須手動執行的指令：沒有](#必須手動執行的指令沒有)
-- [下載 APK](#下載-apk)
-- [全部關閉](#全部關閉)
-- [套件漏洞檢查：`/audit`](#套件漏洞檢查audit)
-- [圖片圖床與免費額度](#圖片圖床與免費額度)
-- [致謝](#致謝)
-- [版本](#版本)
-- [發佈 release](#發佈-release)
+
+**設定與原理**
+- [設定參考](#設定參考)
+- [快取策略](#快取策略)
+- [R2 圖床與免費額度](#r2-圖床與免費額度)
+- [標籤翻譯](#標籤翻譯)
+- [代理與網路](#代理與網路)
+
+**深入**
+- [2000 MB 上傳上限](#2000-mb-上傳上限)
+- [e-hentai 解析流程](#e-hentai-解析流程)
+- [Android 特有的問題](#android-特有的問題)
+
+**疑難排解與維護**
+- [疑難排解](#疑難排解)
+- [套件漏洞檢查](#套件漏洞檢查)
+- [更新標籤字典](#更新標籤字典)
+- [版本與發佈](#版本與發佈)
 - [編輯 PowerShell 腳本](#編輯-powershell-腳本)
 
+**其他**
+- [致謝](#致謝)
+- [授權](#授權)
+
 ---
 
-## 這是獨立專案
+## 這是什麼
 
-**Windows 專案不會被這裡的任何東西改動**，本專案也不從它匯入任何東西。兩者靠**複製**共用同一份核心檔案：
+| 你傳的連結 | 得到什麼 |
+| --- | --- |
+| `x.com/.../status/...` | 圖片／影片原檔，多張自動組成相簿 |
+| `pixiv.net/artworks/...` | 原圖（非壓縮），多張自動組成相簿 |
+| `e-hentai.org/g/...` | **四個按鈕**：瀏覽頁（Telegraph）、歸檔（縮圖版／原圖版）|
 
-| | Windows 專案 | 本專案 |
+**e-hentai 的四個按鈕：**
+
+| 按鈕 | 做什麼 | 大小 |
 | --- | --- | --- |
-| 核心（`bot.py`、`ehentai.py`、`pixiv_login.py`、`tag_translations.py`） | 有 | 有 —— 複製品 |
-| `run_local_api.py`、`host_proxy_relay.py`、`list_console_windows.py` | 有 | **沒有** |
-| `verify_boot.py`、`socks5_transport.py`、`install_pillow_offline.py` | 有 | **沒有** |
-| `run.bat`、`docker-compose.yml`、`harden_permissions.ps1` | 有 | **沒有** |
-| 啟動器 | `run.bat` | `scripts/run-bot.sh` |
-| 伺服器 | Docker + `run_local_api.py` | Linux chroot + `scripts/run-server.sh` |
+| **瀏覽（Telegraph）** | 建立可直接在 Telegram 內開的頁面，圖片託管在 R2 | 小 |
+| **歸檔 · 縮圖版** | 下載 e-hentai 官方的 1280 版 ZIP | 中 |
+| **歸檔 · 原圖版** | 下載官方的原圖 ZIP | 大 |
+| **重新生成** | 修復已失效的頁面（原連結不變） | 小 |
 
-> **核心檔案是複製品，不是共用函式庫。** 在一邊修好的 bug，另一邊必須手動套用同樣的修正。
-> 這是兩個專案各自獨立的代價，也是兩邊都保留同一套特性測試的原因 —— 這裡 423 項、那邊 425 項，
-> 差的那兩項正好是無法套用的 Windows 專屬斷言。
-> （目前：Android 475 項、Windows 462 項。）
+**不支援的連結一律靜默** —— 不回覆、不報錯，群組裡也不會因為有人貼了別的網站而洗版。
 
 ---
 
-## 功能與平台差異
+## 功能
 
-所有平台相關的程式碼都集中在 `bot/platform_support.py`，以及核心裡八個有防護的點。理由值得知道，
-因為每一項都對應一次真實的失敗：
+**解析**
 
-| 項目 | Windows | Android |
-| --- | --- | --- |
-| **代理** | 從 `HKCU\...\Internet Settings` 讀取 | **沒有登錄檔**；只讀環境變數（`BOT_PROXY` 優先） |
-| **子行程的解譯器** | `sys._base_executable`，因為 venv 啟動器會多開一個主控台視窗 | `sys.executable`；沒有啟動器、沒有主控台 |
-| **分離行程** | `DETACHED_PROCESS \| CREATE_NO_WINDOW` | `start_new_session=True` |
-| **檔案鎖定** | `msvcrt.locking` | `fcntl.flock` |
-| **gallery-dl 名稱** | 在 `PATH` 上叫 `gallery-dl.exe` | 沒有副檔名，放在解譯器旁邊 |
-| **主控台編碼** | 需要修正代碼頁 | 已經是 UTF-8 |
-| **給操作者的提示** | 指向 `.venv\Scripts\...` | 指向真正的解譯器與目錄 |
+- 三個站台的連結，含短網址與 `?p=N` 分頁變體
+- 相簿自動分組（每組最多 10 張，超過自動拆成多則）
+- 圖片超過 10 MB 會**降尺寸重編碼**，而不是拒絕傳送
+- 檔案超過上傳上限時自動切分成多個 ZIP
 
-`.env` **先讀專案根目錄**，再讀 `bot/`，所以操作者只要編輯最上層那一個檔案，不必進到套件目錄裡找。
+**e-hentai**
+
+- Telegraph 頁面，圖片在 R2，**網址不會因為 keystamp 過期而失效**
+- 官方歸檔優先（比自行打包快得多，也準確得多）
+- 標籤翻譯成繁體中文（台灣），14,324 條
+- **自動偵測並修復失效的頁面**，原連結保持不變
+- 同一本再送一次會**沿用既有的頁面**，不會產生第二個
+
+**可靠度**
+
+- 開機自動啟動，並**等到網路真的通了才開始輪詢**（見[代理與網路](#代理與網路)）
+- 單一實例鎖，重複啟動不會產生兩個機器人
+- 停止按鈕在**掃描與 R2 上傳階段都能真的停下**
+- 解析快取分層：便宜的事每次重做，昂貴的事才複用（見[快取策略](#快取策略)）
+
+**安全**
+
+- 管理員指令有獨立的白名單
+- 群組守門模式：只有授權的群組能用
+- `/audit` 對每一個套件查 OSV 漏洞資料庫
+- 控制面板只綁 loopback，需要時才產生 token
 
 ---
 
-## 部署
+## 快速開始
 
-### 0. 先跑探測腳本
+### 需求
 
-```bash
-bash scripts/probe-device.sh
-```
+- Android 手機（arm64），**已 root** 才能用 2000 MB 上傳上限；不 root 也能跑，上限 50 MB
+- Termux（[release 裡附 0.118.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/latest)）
+- 一個梯子 —— 開發時用 FlClash 的 **TUN 模式**
+- Telegram 的 `api_id` / `api_hash`（<https://my.telegram.org>）
 
-**它不會改變任何東西。** 它只回報核心實際提供什麼 —— namespace、cgroup、overlayfs、SELinux 狀態 ——
-而那份輸出決定下面哪一條路徑可行。**遇到問題時請把它貼出來。**
-
-### 1. 安裝
-
-在 Termux 裡：
+### 安裝
 
 ```bash
 pkg install git
-git clone <本專案> ~/twitter_pixiv_tg_bot
+git clone https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android.git ~/twitter_pixiv_tg_bot
 cd ~/twitter_pixiv_tg_bot
 bash scripts/setup-termux.sh
 ```
 
-這會安裝 Python 與相關套件、從範例建立 `.env`，然後**在 Debian chroot 裡建置自架的 Bot API 伺服器**。
-建置是最慢的部分 —— **手機上要 20 到 60 分鐘**，而且會編譯 TDLib。**請插著電源跑。**
+這會裝好 Python 與相依套件、從範例建立 `.env`，然後**在 Debian chroot 裡建置自架的 Bot API 伺服器**。
+建置是最慢的部分 —— **手機上 20 到 60 分鐘**，而且會編譯 TDLib，**請插著電源**。
 
-如果不需要 2000 MB 上限：
+不需要 2000 MB 上限的話：
 
 ```bash
 bash scripts/setup-termux.sh --no-server
 ```
 
-### 2. 設定
+### 設定
 
-編輯專案根目錄的 `.env`：
+編輯專案根目錄的 `.env`（完整清單見[設定參考](#設定參考)）：
 
 ```
 BOT_TOKEN=<向 @BotFather 取得>
 ADMIN_USER_IDS=<你的數字 id，在 bot 裡用 /id 取得>
-TELEGRAM_API_ID=<向 my.telegram.org 取得>
-TELEGRAM_API_HASH=<向 my.telegram.org 取得>
+```
+
+要 2000 MB 上限再加上：
+
+```
+TELEGRAM_API_ID=<my.telegram.org>
+TELEGRAM_API_HASH=<my.telegram.org>
 TELEGRAM_API_BASE=http://127.0.0.1:8081
 TELEGRAM_LOCAL=1
 ```
@@ -121,79 +146,356 @@ TELEGRAM_LOCAL=1
 把登入憑證放進 `cookies/` —— `twitter.txt` 與 `ehentai.txt`，格式為 **Netscape cookie**。
 
 > **刻意不使用 `gallery-dl --cookies-from-browser`。** Android 核心預設封鎖 `ptrace`，
-> 所以讀取瀏覽器的 cookie 資料庫根本不可能運作。純 cookie 檔案是唯一可靠的方式，
-> 也是本專案一直以來使用的方式。
+> 讀取瀏覽器的 cookie 資料庫根本不可能運作。純 cookie 檔案是唯一可靠的方式。
 
-### 3. 執行
+Pixiv 用 refresh token，跑一次即可：
 
 ```bash
-bash scripts/run-bot.sh                 # 前景執行，Ctrl-C 停止
+python bot/pixiv_login.py
+```
+
+### 執行
+
+```bash
+bash scripts/run-bot.sh                 # 前景，Ctrl-C 停止
 bash scripts/run-bot.sh --background    # 關掉工作階段也不會停
 bash scripts/run-bot.sh --status
 bash scripts/run-bot.sh --stop
-```
 
-```bash
 bash scripts/run-server.sh start|stop|restart|status|logs
 ```
 
----
+**開機自動啟動：**
 
-## Android 特有的兩個問題
-
-**CPU 休眠。** 這是手機版機器人「停止運作」最常見的原因 —— 行程還活著，但輪詢已經悄悄停了。
-`run-bot.sh` 啟動時會向 Termux 取得喚醒鎖定，結束時釋放（包含當掉的情況）。
-沒有安裝 `termux-api` 時它會**警告**，而不是假裝成功。
-
-**系統殺掉行程。** Android 會積極回收記憶體。兩件事有幫助：
-
-- 對 Termux 關閉電池最佳化（設定 → 應用程式 → Termux → 電池 → 不受限制）
-- 用 `--background` 執行，這樣它不會綁在可能被關掉的終端機上
-
-**喚醒鎖定不會撐過重新開機。** 要讓機器人自動重啟，請用 Termux:Boot，
-把 `bash ~/twitter_pixiv_tg_bot/scripts/run-bot.sh --background` 放進 `~/.termux/boot/`。
-
----
-
-## 關於 2000 MB 上傳上限
-
-Telegram 公開 API 的單次上傳上限是 **50 MB**。自架 Bot API 伺服器可以提高到 **2000 MB**，
-而 `TELEGRAM_LOCAL=1` 讓機器人把**路徑**交給 Telegram 而不是上傳位元組 —— 連上傳時間都省掉了。
-
-`MAX_UPLOAD_MB=45` 是預設值，正是為了讓機器人在兩種情況下都能運作：沒有伺服器時，
-檔案維持在 50 MB 公開上限內，不會有任何東西失敗。有伺服器時再把它調高。
-
-伺服器是一個監聽 `127.0.0.1:8081` 的行程。
-
-> **代理注意事項：** Windows 專案的伺服器跑在 Docker 裡，需要一個主機轉送才能連到代理，
-> 因為容器看不到 loopback。在 chroot 裡沒有這種邊界，所以**這裡不需要任何轉送** ——
-> 這就是 `host_proxy_relay.py` 沒有 Android 對應版本的原因。
-
-如果 `BOT_PROXY` 沒有設定，而 Clash for Android 跑在 **VPN 模式**，**就讓它保持未設定**：
-流量已經被重新導向了，把機器人指向代理埠反而會弄壞一個能用的設定。
-只有在 Clash 的**代理模式**（一個監聽中的 SOCKS 埠）才需要設定：
-
-```
-BOT_PROXY=127.0.0.1:7890
+```bash
+mkdir -p ~/.termux/boot
+cp scripts/boot-services.sh ~/.termux/boot/10-bot.sh
+chmod +x ~/.termux/boot/10-bot.sh
 ```
 
-單獨的 `host:port` 會被接受，並當作 SOCKS5 處理。
-
-### 沒有涵蓋的部分
-
-- **不使用 Docker，也不需要 Docker。** 探測腳本會回報這個核心能不能跑它；
-  chroot 路徑不用它也能達到同樣的 2000 MB。如果探測結果顯示有 overlayfs 與 cgroup，
-  Docker 是一個選項，但本專案不依賴它。
-- **`termux-api` 需要另外安裝**（為了喚醒鎖定）。`pkg install termux-api`，
-  再加上 F-Droid 上的 Termux:API 應用程式。
-- **測試套件在桌機上跑，不在手機上跑。** 它需要不依賴 `pytest` 的純 Python，
-  而且要跑幾分鐘；在手機上，先跑完再複製變更過去會比較容易。
+Termux:Boot 安裝後必須開啟一次，而且 **Termux 與梯子 App 都必須免除電池最佳化**，
+否則 Android 會把它們殺掉。
 
 ---
 
-## 代理的格式比看起來重要
+## 手機 App
 
-`apt` 與 `pip` **都不能用 SOCKS 代理**，而且兩者回報錯誤的方式都會把責任推給別的東西：
+一個原生 App（`app/`），提供與控制面板相同的動作，**正常情況下 Termux 裡一個字都不用打。**
+
+![控制台](apk/screenshot.png)
+
+### 安裝 APK
+
+需要的東西都附在[最新的 release](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/latest)：
+
+| 檔案 | 大小 | 是什麼 |
+| --- | --- | --- |
+| `bot-panel.apk` | 48.8 KB | 控制 App |
+| `termux.apk` | 108.6 MB | Termux 本體（0.118.3，F-Droid 版）|
+| `termux-api.apk` | 3.8 MB | 提供 `termux-wake-lock` |
+| `termux-boot.apk` | 25.4 KB | 開機時啟動服務 |
+
+```bash
+adb install -r bot-panel.apk
+adb install -r termux.apk
+adb install -r termux-api.apk
+adb install -r termux-boot.apk
+```
+
+**Termux 本體是 108.6 MB**，超過 GitHub 對單一檔案 100 MB 的上限，所以它放在 release 裡而不是
+`apk/` 裡。**每個 release 都保留該版本的 `bot-panel.apk`**，新版本出問題時還是能取得舊的建置。
+
+安裝程式做不到的兩件事，**兩件都必須完成**，App 才能啟動任何東西：
+
+```bash
+# 1. 讓 App 有權限送 intent 給 Termux
+adb shell pm grant com.yunai.botpanel com.termux.permission.RUN_COMMAND
+
+# 2. 讓 Termux 接受外部應用程式的 intent（然後 Termux 必須重新啟動）
+bash ~/twitter_pixiv_tg_bot/scripts/enable-external-apps.sh
+```
+
+### 一鍵啟動
+
+按下 **一鍵啟動服務** 會送出一個 `com.termux.RUN_COMMAND` intent，讓 Termux 執行
+`scripts/start-all.sh` —— 與開機腳本用的是同一支。App 接著持續輪詢，直到面板回應、
+卡片自己消失，**所以它也會偵測到你手動執行的指令**。
+
+```bash
+bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh            # 全部，照順序
+bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --status   # 只回報
+bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --restart  # 先停，再起
+```
+
+### 全部關閉
+
+**電源 → 全部關閉（含面板）** 會先停機器人、再停伺服器、最後停面板自己。
+
+它被放在獨立的一區、遠離其他工具，因為那個畫面上的其他東西都能從那個畫面復原 ——
+**而這一個結束了 App 自己的用處**，因為面板是最後消失的東西。
+
+> **為什麼面板會先回應才死掉：** 請求是透過 HTTP 進來的，而面板本身就是被停止的東西之一。
+> 在還處理著請求的時候把它殺掉，會在回應寫出之前就關掉 socket，App 就會對一個成功的動作
+> 回報失敗 —— 那是最糟的一種回饋，因為它會誘使使用者再按一次。
+>
+> 所以工作被交給一個**分離**的行程（`start_new_session=True`），它等兩秒，而處理函式立刻回傳。
+> 實測：回應在 13 毫秒內送達、讀到的時候伺服器已經消失、面板自己則在兩秒後結束。
+
+**要回來不需要打任何字** —— 靠的就是「一鍵啟動服務」那張卡片，它**不需要面板活著**。
+
+### 不用 Gradle 建置
+
+Gradle 加上 Android Gradle Plugin 大約要下載 500 MB，第一次建置要好幾分鐘解析依賴。
+這個 App 只有一個 activity、沒有任何函式庫依賴，所以 `build.ps1` 直接驅動 AGP 底下的工具鏈：
+`aapt2`、`javac`、`d8`、`zipalign`、`apksigner`。**APK 只有 48.8 KB。**
+
+```powershell
+powershell -File app/build.ps1              # 建置
+powershell -File app/build.ps1 -Install     # 也會推到裝置
+powershell -File app/build.ps1 -Clean -Install
+```
+
+需要 541 MB 的 SDK：
+
+```bash
+sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+```
+
+---
+
+## 控制面板
+
+一個本機網頁，用來啟動、停止、重啟機器人與伺服器，查看記錄、清除快取、編輯 `.env`。
+
+```bash
+bash control/run-panel.sh start      # 然後開啟 http://127.0.0.1:8090/
+bash control/run-panel.sh status
+bash control/run-panel.sh stop
+```
+
+在 Chrome 裡用**選單 → 加到主畫面**就會變成類應用程式圖示：manifest 設定了
+`display: standalone`，所以它會全螢幕開啟、沒有網址列，而且因為所有東西都從手機內部提供，
+**它可以離線運作**。
+
+> **App 是透過面板跟 Termux 溝通的。** 啟動機器人意味著要在 Termux 裡跑 `run-bot.sh`，
+> 而直接讀 Termux 的記錄不可能 —— `/data/data/com.termux/files/home` 對其他套件不可讀。
+> 所以**面板沒在跑的時候，App 什麼都不能做**，它會顯示一個橫幅、寫出啟動用的指令，
+> 而不是一個看起來壞掉的空白畫面。
+
+**每一個按鈕都是去呼叫 `run-bot.sh` 或 `run-server.sh`。** 面板不重新實作啟動機器人，
+所以它不可能跟那些腳本的行為脫節 —— 而且面板能做的事，在面板沒跑的時候用命令列一樣能做完。
+
+**只綁定 `127.0.0.1`。** 面板可以讀寫 `.env`（裡面有 bot token），也可以啟動與停止機器人 ——
+在沒有密碼的情況下從區網可達，那就等於一個遠端 shell。要對外開放必須明講：
+
+```bash
+PANEL_HOST=0.0.0.0 bash control/run-panel.sh start     # 會印出 token，每個請求都必須提供
+```
+
+**面板不在開機腳本裡。** 沒有理由地讓一個 HTTP 服務一直跑著，是一種不值得養成的習慣。
+
+---
+
+## 設定參考
+
+所有設定都在專案根目錄的 `.env`。`.env` **先讀專案根目錄**，再讀 `bot/`，
+所以只要編輯最上層那一個檔案。
+
+### 必要
+
+| 鍵 | 說明 |
+| --- | --- |
+| `BOT_TOKEN` | 向 [@BotFather](https://t.me/BotFather) 取得 |
+| `ADMIN_USER_IDS` | 數字 id，用逗號分隔。在 bot 裡打 `/id` 取得 |
+| `BLOCKED_USER_IDS` | 封鎖名單（私訊黑名單模式）|
+
+### 上傳
+
+| 鍵 | 預設 | 說明 |
+| --- | --- | --- |
+| `MAX_UPLOAD_MB` | `45` | 單檔上限。不用伺服器時保持在 50 以下 |
+| `MAX_FILES` | `20` | 單次解析最多幾個檔案 |
+| `MAX_DOWNLOAD_SECONDS` | `180` | 下載逾時 |
+| `MAX_CONCURRENT_DOWNLOADS` | `2` | 同時幾個解析 |
+| `USER_COOLDOWN_SECONDS` | `10` | 每人兩次指令之間的最短間隔 |
+
+### 快取
+
+| 鍵 | 預設 | 說明 |
+| --- | --- | --- |
+| `CACHE_FILE` | `parse_cache.json` | 索引 |
+| `CACHE_DIR` | `.cache` | 檔案（只有 Twitter／Pixiv 會用到）|
+| `CACHE_STALE_SECONDS` | `1209600`（14 天）| 條目過期 |
+| `CACHE_MAX_ENTRIES` | `300` | 條目上限 |
+| `GALLERY_META_TTL_SECONDS` | **`0`** | **0 = 每次都重讀 tag／標題／評分** |
+| `GALLERY_URL_TTL_SECONDS` | `7200`（2 小時）| 掃描到的圖片網址多久重用一次 |
+| `GALLERY_CACHE` | `1` | 關掉會失去 Telegraph 頁面複用 |
+| `ARCHIVE_CACHE` | `1` | 官方 ZIP 快取 |
+| `ARCHIVE_CACHE_MAX_BYTES` | `8589934592`（8 GB）| 歸檔快取上限 |
+
+### e-hentai
+
+| 鍵 | 預設 | 說明 |
+| --- | --- | --- |
+| `EHENTAI_COOKIES` | `cookies/ehentai.txt` | Netscape 格式 |
+| `TELEGRAPH_ALLOW_ADULT` | `1` | 成人畫廊要不要建立頁面 |
+| `TELEGRAPH_AUTHOR` | `e-hentai 解析` | 頁面上顯示的作者 |
+| `EHENTAI_VIEWER_WORKERS` | `6` | 掃描頁面時的並行數 |
+| `EHENTAI_DOWNLOAD_WORKERS` | `6` | 下載頁面時的並行數 |
+| `ARCHIVE_DEADLINE_SECONDS` | `300` | 官方歸檔的整體時限 |
+
+### 圖床（選用）
+
+五個值**必須全部填寫**，否則 R2 不啟用。詳見 [R2 圖床](#r2-圖床與免費額度)。
+
+```bash
+R2_ACCOUNT_ID=
+R2_ACCESS_KEY=
+R2_SECRET_KEY=
+R2_BUCKET=
+R2_PUBLIC_BASE=          # 例如 https://img.example.com
+R2_FREE_BYTES=10000000000
+R2_LIMIT_PERCENT=95
+```
+
+### 網路
+
+| 鍵 | 預設 | 說明 |
+| --- | --- | --- |
+| `BOT_PROXY` | （未設）| **TUN 模式下不要設**，見[代理與網路](#代理與網路) |
+| `TELEGRAM_API_BASE` | （未設）| 自架伺服器：`http://127.0.0.1:8081` |
+| `TELEGRAM_LOCAL` | `0` | `1` = 把路徑交給 Telegram，連上傳時間都省掉 |
+| `STARTUP_WAIT_SECONDS` | `900` | 開機時最多等網路多久 |
+
+### 行為
+
+| 鍵 | 預設 | 說明 |
+| --- | --- | --- |
+| `REPLY_UNSUPPORTED_LINKS` | `0` | `0` = 不支援的連結完全靜默 |
+| `ATTACH_SOURCE_LINK` | `1` | 附上原始連結 |
+| `DELETE_STATUS_MESSAGE` | `1` | 完成後刪掉「正在解析……」那則 |
+| `DELETE_SOURCE_MESSAGE` | `1` | 刪掉原始的連結訊息 |
+| `AUTH_GROUP_LOCKED` | `0` | `1` = 只允許授權過的群組 |
+
+---
+
+## 快取策略
+
+**這裡只有一件事值得記住：便宜的事每次重做，昂貴的事才複用。**
+
+| 資料 | 成本 | 策略 |
+| --- | --- | --- |
+| 標題、tag、評分 | **1 個請求** | **每次都重讀**（`GALLERY_META_TTL_SECONDS=0`）|
+| 掃描到的圖片網址 | **每頁 1 個，50 頁 = 50 個** | 2 小時（`GALLERY_URL_TTL_SECONDS`）|
+| Telegraph 頁面網址 | 建立一個新頁面 | 永久，直到條目過期 |
+| R2 圖片網址 | 每張重新計算雜湊 | 永久，直到條目過期 |
+| Twitter／Pixiv 檔案 | 重新下載 | 14 天（`CACHE_STALE_SECONDS`）|
+| 官方歸檔 ZIP | 幾十 MB 的下載 | 8 GB 上限內 |
+
+> **這一層分開是有代價換來的。** 原本 `CACHE_STALE_SECONDS`（14 天）管整個 payload，
+> 所以 e-hentai 上編輯過的 tag 要**兩週**才會出現。改成 6 小時的 metadata TTL 之後仍然不夠 ——
+> log 顯示一本 47 分鐘前快取的本子（`命中畫廊快取（2853 秒前）`）照樣顯示舊標籤。
+> **省下的是「一個請求」，而代價是一個錯誤的答案，那不是節省。**
+
+**畫廊的頁面圖片從來不存到本機** —— 解析時每一張直接串流到 R2。
+`.cache` 裡的檔案全部屬於 Twitter／Pixiv；e-hentai 只有官方歸檔會落在磁碟上。
+
+---
+
+## R2 圖床與免費額度
+
+e-hentai 的內嵌圖片網址是用 `keystamp` 簽章的，**時效一過，整個頁面的圖片會一起失效** ——
+這正是「重新生成」按鈕存在的理由。
+
+**圖片會被複製到 Cloudflare R2**，那裡的物件沒有這種時效。頁面上的網址因此變成
+`https://img.example.com/...`，不會再過期。
+
+**R2 免費額度是每月 10 GB 儲存空間**（對外流量免費、讀取在額度內免費），
+所以儲存是唯一可能產生帳單的部分。一本畫廊的顯示圖約 **30 MB**，大約可以放三百本。
+
+**上限設在額度的 95%（9.5 GB），而不是額度本身。** 儲存是按月、按物件存在的時間計費，
+所以剛好用到 10 GB、一週後才刪掉，那個月仍然超額。
+
+兩道檢查，因為它們回答不同的問題：
+
+| 時機 | 檢查 | 為什麼 |
+| --- | --- | --- |
+| **下載任何東西之前** | 桶裡已經存了多少 | 已經滿了就**直接拒絕** —— 抓 30 MB 下來才決定不上傳是浪費 |
+| **每張圖片上傳前** | 已存 + 這張是否超額 | 第一道無法知道要上傳多少 —— 那只有下載了才知道 |
+
+**檢查在寫入之前執行** —— 已經上傳的就是已經計費的。
+
+用量是**詢問桶本身**，不是本地計數器：本地計數在你第一次從 Cloudflare 儀表板刪東西時就會漂移。
+**讀不到用量時就不上傳** —— 問「這會不會花錢」而答不出來時，安全的方向是不要動它。
+
+**兩種情況都會通知管理員**，因為達到上限是代替操作者做的決定，而結果是頁面少了一些圖片。
+
+**App 與面板都會顯示目前用量** —— 已用／總量、剩餘、物件數，以及一條 80% 轉黃、達到上限轉紅的進度條。
+
+---
+
+## 標籤翻譯
+
+e-hentai 的標籤會翻譯成繁體中文（台灣）：
+
+```
+語言: #漢語 #翻譯
+原作: #絕區零
+角色: #貓宮又奈 #哲_|_華茲
+藝術家: #nito
+女性: #貓女 #黑皮 #獸耳 #蘿莉
+```
+
+**14,324 條**，由 [`tools/build_tag_translations.py`](tools/build_tag_translations.py) 從
+[EhTagTranslation/Database](https://github.com/EhTagTranslation/Database) 產生。
+目前對應上游 commit `4f4ab9d`（2026-11-03）。
+
+**兩個轉換都是必要的：**
+
+1. **簡體轉繁體用 `s2twp` 而不是 `s2t`。** `s2t` 只映射字符，所以「打印机」會變成「打印機」而不是
+   「印表機」—— **字符轉換不是翻譯。** `s2twp` 連詞彙一起轉，那才是台灣實際讀到的東西。
+2. **圖示標記會被剝掉。** 名稱欄可能是 `![贝合图标](https://...)贝合`，直接切分會把 img 標籤
+   留在變成 hashtag 的字串中間。
+
+**artist 與 group 刻意不收。** 那兩者有 30,000 條，而它們的「翻譯」是筆名的羅馬拼音 ——
+`endou hiroto` 變成「遠藤弘土」，沒有人會那樣搜尋，而且比原本的字串更長。
+其餘十個命名空間才是讀者真正受益於中文的部分。
+
+**同一個名字在不同命名空間有不同意思** —— `angel` 是女性的「天使」也是角色的「安吉爾」。
+機器人只用值查表，所以只能留一個，而留的應該是**通用的描述性標籤**，不是剛好同名的角色名。
+因此最特定的（character）先解析、最通用的（female）最後 —— **最後寫入的勝出。**
+
+**要更新字典見[更新標籤字典](#更新標籤字典)。**
+
+---
+
+## 代理與網路
+
+### TUN 模式：不要設代理
+
+如果你的梯子跑在 **VPN／TUN 模式**（FlClash、v2rayNG 都是），**讓 `BOT_PROXY` 保持未設**。
+流量已經被重新導向，再設代理只會讓每個請求失敗在一個關閉的埠上。
+
+> **這個錯誤看起來不像設定問題。** 實測：`tun0` 正常、直連 `api.telegram.org` 回 302、
+> `e-hentai.org` 回 200 —— 而每一個下載都失敗在
+> `ProxyError: Failed to establish a new connection: [Errno 111] Connection refused`，
+> 因為 `BOT_PROXY` 還指著切換模式前那個代理埠。
+>
+> **一個設定好但死掉的代理，比沒有代理更糟** —— 沒有代理會成功，關閉的埠讓每個請求失敗。
+
+`ehentai.proxy_url()` 現在會**先探測 loopback 代理**，埠沒開就回退成直連，
+所以切換模式不會再弄壞一個能用的網路。遠端代理不探測 —— 那是刻意的選擇，
+短暫變慢不等於不存在。
+
+### 代理模式：要用 HTTP 格式
+
+只有在梯子確實開了一個**監聽中的代理埠**時才需要設定：
+
+```
+BOT_PROXY=http://127.0.0.1:7890
+```
+
+**格式很重要，因為 `apt` 與 `pip` 都不能用 SOCKS**，而兩者回報錯誤的方式都會把責任推給別的東西：
 
 ```
 $ apt-get update
@@ -202,35 +504,17 @@ E: The repository 'https://packages-cf.termux.dev/apt/termux-main stable Release
    does not have a Release file.
 ```
 
-那段訊息點名的是**儲存庫**，所以讀起來像是鏡像站壞了或連不上。但實際上**每一個 Termux 鏡像
-都在正常提供它的 Release 檔** —— 從同一網段的電腦驗證過，五個全部回 `200`、內容都是
-13134 位元組 —— 而 `apt` 對每一個都失敗。**那行 SOCKS 才是唯一的線索，而它在錯誤訊息的上面。**
-
-`pip` 的說法不一樣：
-
-```
-ERROR: Could not install packages due to an OSError: Missing dependencies for SOCKS support.
-```
-
-pip 需要 PySocks 才能講 SOCKS，而安裝 PySocks 又需要 pip。**兩則訊息都沒有說「改用 HTTP 格式」，
-而那正是兩者的解法。**
-
-### 啟動腳本現在做的事
+那段訊息點名的是**儲存庫**，所以讀起來像是鏡像站壞了。但實際上**每一個 Termux 鏡像都在正常提供它的
+Release 檔** —— 從同一網段的電腦驗證過，五個全部回 `200`、內容都是 13134 位元組 —— 而 `apt` 對每一個都失敗。
+**那行 SOCKS 才是唯一的線索，而它在錯誤訊息的上面。**
 
 | 檔案 | 格式 | 原因 |
 | --- | --- | --- |
-| `~/.proxy-url` | **HTTP** | `apt` 與 `pip` 需要的格式，也是 `~/.bashrc` 讀的 |
-| `~/.proxy-url-socks` | SOCKS（若有提供） | 給偏好 SOCKS 的工具 |
-| `apt.conf.d/95proxy` | **HTTP** | apt 為自己的傳輸讀這個檔案，而不是讀環境變數 |
-| shell 裡的 `http_proxy` / `all_proxy` | HTTP | 讓每個子行程都拿到可用的格式 |
+| `~/.proxy-url` | **HTTP** | `apt` 與 `pip` 需要，也是 `~/.bashrc` 讀的 |
+| `apt.conf.d/95proxy` | **HTTP** | apt 讀這個檔案，**優先於**環境變數 |
+| shell 裡的 `http_proxy` | HTTP | 讓每個子行程都拿到可用的格式 |
 
-**`apt.conf.d/95proxy` 的優先順序高於環境變數**，所以在那裡留著 SOCKS 值，
-不管 `.bashrc` 怎麼寫都會繼續讓 apt 失敗。這正是這裡發生過的事：把 `.bashrc` 與 `~/.proxy-url`
-改成 HTTP 完全沒用，因為那個檔案還留著第一次執行時的舊值。
-
-### 如果 apt 又說找不到 Release 檔
-
-**先檢查代理，再檢查鏡像站：**
+**如果 apt 又說找不到 Release 檔**，先檢查代理再檢查鏡像站：
 
 ```bash
 cat $PREFIX/etc/apt/apt.conf.d/95proxy
@@ -241,17 +525,21 @@ cat ~/.proxy-url
 
 ---
 
-## 自架 Bot API 伺服器
+## 2000 MB 上傳上限
 
-把上傳上限從 50 MB 提高到 2000 MB。機器人本身兩種情況都一樣；這是選用步驟，
-**在完成之前 `TELEGRAM_LOCAL` 必須保持 `0`。**
+Telegram 公開 API 的單次上傳上限是 **50 MB**。自架 Bot API 伺服器可以提高到 **2000 MB**，
+而 `TELEGRAM_LOCAL=1` 讓機器人把**路徑**交給 Telegram 而不是上傳位元組 —— 連上傳時間都省掉了。
+
+`MAX_UPLOAD_MB=45` 是預設值，正是為了讓機器人在兩種情況下都能運作：沒有伺服器時，
+檔案維持在 50 MB 公開上限內，不會有任何東西失敗。有伺服器時再把它調高。
+
+**所以這個上限完全是選用的** —— 不建置伺服器，機器人照樣運作。
 
 ### 需要什麼
 
 透過 `proot-distro` 的 Debian chroot，加上從原始碼編譯的 `telegram-bot-api`。
 TDLib 佔了大半：在 8 核心手機上用 `-j2` 大約 **40 分鐘**，另外 rootfs 與建置目錄約需 1.1 GB。
-結果是 `$PREFIX/var/lib/proot-distro/containers/botapi/rootfs/usr/local/bin/telegram-bot-api`
-一個 45 MB 的執行檔。
+結果是一個 45 MB 的執行檔。
 
 ### 這個執行檔不能直接跑
 
@@ -271,14 +559,10 @@ proot-distro login botapi -- /usr/local/bin/telegram-bot-api ...
 從 `installed-rootfs/<name>` 移到 `containers/<name>/rootfs`。只檢查舊路徑的話，
 會對一個明明存在的執行檔回報「binary missing」。
 
-`--dir` 會用 `realpath` 驗證，而且伺服器在目錄不存在時**拒絕啟動 —— 它不會幫你建立**。
-`run-server.sh` 會先建立它，並傳入它的 **chroot** 路徑（`/root/telegram-bot-api`），
-而不是 Termux 路徑 —— `/data/data/com.termux/...` 在容器裡並不存在。
-
 ### loopback 是共用的
 
-從 Termux 應用程式實測：在 chroot 裡啟動一個監聽 `0.0.0.0:8099` 的服務，
-Termux 可以連上它，所以機器人從容器外面連 `127.0.0.1:8081` 不需要任何轉送。
+從 Termux 應用程式實測：在 chroot 裡啟動一個監聽 `0.0.0.0:8099` 的服務，Termux 可以連上它，
+所以機器人從容器外面連 `127.0.0.1:8081` 不需要任何轉送。
 
 > ### ⚠️ 不要透過 `su` 測試這件事
 >
@@ -288,309 +572,109 @@ Termux 可以連上它，所以機器人從容器外面連 `127.0.0.1:8081` 不�
 > 三次獨立的調查分別得出「VPN 被殺了」、「VPN 從 chroot 連不到」、「chroot 被網路隔離」的結論，
 > 全都是因為這個原因，而且**三次都錯了**。網路檢查必須從 Termux 應用程式執行。
 
-### 建置它
+### 建置時的兩個陷阱
 
-`proot-distro` **不需要 root**：它在使用者空間行程裡用 ptrace 實作 chroot 與 mount。
+**`proot-distro` 不需要 root** —— 它在使用者空間行程裡用 ptrace 實作 chroot 與 mount。
 `su` 在這裡反而有害，因為它會把行程移到一個讀不到 Termux 自己目錄的網域。
 
-chroot 不會繼承 Termux 的代理設定 —— 它有自己的 apt —— 所以 `setup-termux.sh` 會把 HTTP 代理格式
-寫進容器內的 `apt.conf.d`，以及 git 的系統設定。**HTTP 格式是必要的：apt 直接拒絕 SOCKS**，
-並回報成 `does not have a Release file`，點名一個運作正常的儲存庫。
-
-`PKG_CONFIG_PATH` 也必須清掉。留著的話，pkg-config 會回答 **Termux 的** OpenSSL，
-CMake 會記下 `-isystem /data/data/com.termux/files/usr/include`，然後建置就會用 Debian 的 gcc
+**`PKG_CONFIG_PATH` 必須清掉。** 留著的話，pkg-config 會回答 **Termux 的** OpenSSL，
+然後 CMake 會記下 `-isystem /data/data/com.termux/files/usr/include`，建置就會用 Debian 的 gcc
 去編譯 Android/bionic 的標頭檔 —— 結果在 `sqlite3.c` 裡失敗，錯誤訊息是 `memccpy` 與 `strcasecmp`，
 **跟 sqlite 一點關係都沒有的檔案。**
 
-### 執行它
+---
 
-```bash
-bash scripts/run-server.sh start|stop|status|restart|logs
-```
-
-然後在 `.env` 裡：
+## e-hentai 解析流程
 
 ```
-TELEGRAM_API_BASE=http://127.0.0.1:8081
-TELEGRAM_LOCAL=1
-MAX_UPLOAD_MB=2000
-BOT_PROXY=http://127.0.0.1:10808
+使用者傳連結
+   │
+   ├─ 讀 metadata（1 個請求）        ← 每次都重讀，tag 才會是新的
+   │
+   └─ 回覆四個按鈕
+        │
+        ├─ 瀏覽（Telegraph）
+        │    ├─ 掃描每一頁的圖片網址     ← 貴，快取 2 小時
+        │    ├─ 上傳到 R2                ← 可停止
+        │    └─ 建立／更新 Telegraph 頁面
+        │
+        ├─ 歸檔（縮圖／原圖）
+        │    ├─ 向 e-hentai 要官方 ZIP 連結
+        │    ├─ 下載（分段並行，可停止）   ← 快取 8 GB 內
+        │    └─ 上傳到 Telegram
+        │
+        └─ 重新生成
+             └─ 檢查頁面圖片是否還活著，壞掉就修，原連結不變
 ```
 
-`BOT_PROXY` 值得設定，即使 shell 通常已經有一個：**機器人自己的 HTTP 用戶端不會讀 shell 環境變數**，
-沒有它的話 Twitter、Pixiv 與 e-hentai 的下載都會失敗。
+**「重新生成」保留原連結**，因為它的目的就是修復那個連結裡的圖片，
+而不是產生一個新的東西讓使用者重新分享。
 
-### 重新開機後
-
-兩個服務都必須回來，而且**伺服器要先起**。`scripts/boot-services.sh` 會做這件事，
-它會等 VPN 就緒、等伺服器綁定埠之後才啟動機器人。用 Termux:Boot 安裝它：
-
-```bash
-mkdir -p ~/.termux/boot
-cp scripts/boot-services.sh ~/.termux/boot/10-bot.sh
-chmod +x ~/.termux/boot/10-bot.sh
-```
-
-Termux:Boot 安裝後必須開啟一次，而且 **Termux 與 VPN 應用程式都必須免除電池最佳化**，
-否則 Android 會把它們殺掉。
+**同一本再送一次會沿用既有的頁面** —— 這就是 `GALLERY_CACHE` 存在的理由，
+關掉它會讓第二次送出產生第二個頁面。
 
 ---
 
-## 控制面板
+## Android 特有的問題
 
-一個本機網頁，用來啟動、停止、重啟機器人與伺服器，查看記錄、清除快取、編輯 `.env` ——
-讓手機做日常操作時不需要終端機。
+### CPU 休眠
 
-```bash
-bash control/run-panel.sh start      # 然後開啟 http://127.0.0.1:8090/
-bash control/run-panel.sh status
-bash control/run-panel.sh stop
-```
+這是手機版機器人「停止運作」最常見的原因 —— 行程還活著，但輪詢已經悄悄停了。
+`run-bot.sh` 啟動時會向 Termux 取得喚醒鎖定，結束時釋放（包含當掉的情況）。
+沒有安裝 `termux-api` 時它會**警告**，而不是假裝成功。
 
-在 Chrome 裡用**選單 → 加到主畫面**就會變成類應用程式圖示：manifest 設定了
-`display: standalone`，所以它會全螢幕開啟、沒有網址列，而且因為所有東西都從手機內部提供，
-**它可以離線運作**。
+### 系統殺掉行程
 
-### 它是刻意做得很薄的一層
+Android 會積極回收記憶體。兩件事有幫助：
 
-**每一個按鈕都是去呼叫 `run-bot.sh` 或 `run-server.sh`。** 面板不重新實作啟動機器人，
-所以它不可能跟那些腳本的行為脫節 —— 而且面板能做的事，在面板沒跑的時候用命令列一樣能做完。
+- 對 Termux 關閉電池最佳化（設定 → 應用程式 → Termux → 電池 → 不受限制）
+- 用 `--background` 執行，這樣它不會綁在可能被關掉的終端機上
 
-### 為什麼只綁定 127.0.0.1
+### 喚醒鎖定不會撐過重新開機
 
-面板可以讀寫 `.env`（裡面有 bot token），也可以啟動與停止機器人。**在沒有密碼的情況下從區網可達，
-那就等於一個遠端 shell。** 所以它綁定 loopback，並**拒絕監聽其他地方，除非 `--host` 這樣說** ——
-那種情況下會產生一個 token，且每個請求都必須附上：
+用 Termux:Boot，把 `bash ~/twitter_pixiv_tg_bot/scripts/boot-services.sh` 放進 `~/.termux/boot/`。
 
-```bash
-bash control/run-panel.sh start                        # loopback，不需要 token
-PANEL_HOST=0.0.0.0 bash control/run-panel.sh start     # 會印出 token，之後必須提供
-```
+**而且開機時網路通常還沒好** —— 梯子需要幾秒到一分鐘。`boot-services.sh` 會等，
+機器人本身也會用 `wait_for_telegram()` 確認 Telegram 真的連得上，**才宣告自己啟動**。
+這修掉了一個真實的故障：開機時 VPN 還沒起來，機器人啟動後死於 `telegram.error.TimedOut`，
+而 log 卻說「機器人已啟動」。
 
-### 不在開機腳本裡
+### 平台差異來自真實的失敗
 
-`~/.termux/boot/10-bot.sh` 只啟動機器人與伺服器。**面板是在有人要看著它的時候才需要的** ——
-沒有理由地讓一個 HTTP 服務一直跑著，是一種不值得養成的習慣。需要時再啟動它。
+所有平台相關的程式碼都集中在 `bot/platform_support.py`，以及核心裡八個有防護的點：
 
-### 真正重要的防護
-
-- **`.env` 的寫入會驗證並備份。** 沒有 `=` 的行、不合法的鍵名、null 位元組都會被拒絕，
-  而且舊檔案會先複製到 `data/env-backups/`（保留最後 20 份）。換行字元強制為 LF ——
-  **CRLF 的 `.env` 會讓值尾巴帶著 `\r`**，這曾經讓伺服器建置失敗，錯誤是
-  `Can't parse as an integer string "30753020"`。
-- **清除快取只會在專案內部進行。** 每個路徑都會先解析、確認在專案根目錄之下才會刪除，
-  而且只刪 `.cache` 的內容，不刪目錄本身。
-- **記錄是用 tail 讀的，不是整份載入。** 那個檔案會無上限成長，所以是以區塊從尾端往回讀；
-  每次輪詢都讀整份會一天比一天慢。
-- **機器人的執行狀態不是只看 pid 檔。** **過期的 pid 檔正是「停止」按鈕悄悄失效的原因**，
-  所以行程列表也會一併檢查。
-
----
-
-## Android 控制 App
-
-一個原生應用程式，提供與控制面板相同的動作：啟動、停止、重啟機器人與伺服器、查看記錄、清除快取。
-程式碼在 `app/`，APK 用以下指令建置：
-
-```powershell
-powershell -File app/build.ps1            # 加上 -Install 也會推到裝置上
-powershell -File app/build.ps1 -Clean -Install
-```
-
-### 它跟控制面板溝通，不是跟 Termux
-
-啟動機器人意味著要在 Termux 裡跑 `run-bot.sh`，而一般應用程式做不到：
-`com.termux.RUN_COMMAND` 需要在 Termux 的 properties 裡設 `allow-external-apps=true`，
-而直接讀 Termux 的記錄也不可能，因為 `/data/data/com.termux/files/home` 對其他套件不可讀。
-面板已經跑在 Termux 裡、也已經剛好提供這些動作，所以它就是那個介面。
-
-> **這個後果是寫在介面裡而不是藏起來的：** 面板沒在跑的時候，App 什麼都不能做，
-> 它會顯示一個橫幅、寫出啟動用的指令，而不是一個看起來壞掉的空白畫面。
-
-```bash
-bash control/run-panel.sh start     # App 能做任何事之前必須先執行這個
-```
-
-### 不用 Gradle 建置
-
-Gradle 加上 Android Gradle Plugin 大約要下載 500 MB，而且第一次建置要好幾分鐘解析依賴。
-這個 App 只有一個 activity、沒有任何函式庫依賴，所以 `build.ps1` 直接驅動 AGP 底下的工具鏈：
-`aapt2` 編譯與連結、`javac`、`d8`、`zipalign`、`apksigner`。**APK 只有 37 KB。**
-
-它需要的 SDK 是 541 MB：
-
-```bash
-sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-```
-
-### 兩個花了真實時間的陷阱
-
-**`d8` 8.2.2 在 javac 21 編譯的匿名內部類別上會當掉。** 不是這個類別特別 ——
-五行 `new Runnable() { ... }` 就能重現：
-
-```
-Error in .../MainActivity$1.class:
-java.lang.NullPointerException: Cannot invoke "String.length()" because "<parameter1>" is null
-```
-
-lambda 會編譯成 `invokedynamic`，不會產生 `$1` 類別檔；**具名**的巢狀類別也沒問題；
-只有匿名形式會壞。所以這個 App 裡沒有任何匿名內部類別。
-
-最直覺的替代方案 —— 用 lambda 初始化一個會重新排程自己的欄位 —— 也編譯不過，
-因為 Java 拒絕一個參考到「正在被初始化的欄位」的欄位初始化式。**`this::pollOnce` 同時避開了這兩個問題。**
-
-**當 `$ErrorActionPreference = "Stop"` 時，PowerShell 會把原生程式的 stderr 變成終止性錯誤。**
-`keytool` 把進度寫到 stderr，所以一次**成功**的金鑰產生把建置中止了。
-因此 `keytool` 與 `apksigner` 都改走 `cmd /c`，而且用完整路徑 ——
-**透過 `cmd` 不會繼承 PowerShell 的 PATH 增補**，所以單寫 `apksigner` 會變成「找不到」。
-
----
-
-## 必須手動執行的指令：沒有
-
-App 可以自己啟動所有東西，所以正常情況下 Termux 裡沒有任何要打的字。
-
-按下 **一鍵啟動服務** 會送出一個 `com.termux.RUN_COMMAND` intent，讓 Termux 執行
-`scripts/start-all.sh` —— 與開機腳本用的是同一支。App 接著會持續輪詢，直到面板回應、
-卡片自己消失，所以**它也會偵測到你手動執行的指令**。
-
-### 必須就緒的兩件事
-
-兩者都只需要設定一次、而且會持續生效；**缺少哪一個，App 會回報出來，而不是看起來什麼都不做。**
-
-**1. Termux 必須允許外部應用程式。** 沒有這個，intent 會被拒絕：
-
-```bash
-bash scripts/enable-external-apps.sh
-```
-
-**然後 Termux 必須重新啟動** —— 它在啟動時只讀一次 `~/.termux/termux.properties`。
-腳本執行完會提醒這件事。
-
-**2. App 必須持有 `com.termux.permission.RUN_COMMAND`。** 它會在執行時請求；
-**全新安裝會重設授權**，而 adb 可以在沒有對話框的情況下恢復它：
-
-```bash
-adb shell pm grant com.yunai.botpanel com.termux.permission.RUN_COMMAND
-```
-
-### 讓這件事看起來像權限問題的陷阱
-
-在權限已授予、服務也宣告 `exported=true` 的情況下，`startService` 回傳 `null`，什麼都沒發生：
-
-```
-W/ActivityManager: Unable to start service Intent { act=com.termux.RUN_COMMAND
-  cmp=com.termux/.app.RunCommandService } U=0: not found
-startService returned null
-```
-
-**對一個存在的服務說「not found」。** 這是 **Android 11（API 30）的套件可見性**：
-一個應用程式只看得到自己的套件，除非它主動要求更多，所以那個服務是**看不見的**。
-**一模一樣的 intent 從 root shell 執行卻成功**，因為 root 不受那個過濾器限制 ——
-**這正是讓調查往權限方向追了好幾輪的原因。**
-
-解法是 manifest 裡的三行：
-
-```xml
-<queries>
-    <package android:name="com.termux" />
-</queries>
-```
-
-用 `<queries>` 而不是 `QUERY_ALL_PACKAGES`：**這個 App 只想要一個套件，而且它把這件事說出來。**
-可見性與權限是兩套不同的機制，而當時只有其中一個是問題。
-
-### 如果還是不行
-
-每張卡片都有一個 **顯示手動指令** 按鈕，會顯示可以打的指令。同樣的腳本兩條路都通 ——
-**App 是便利，不是替代品。**
-
-```bash
-bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh           # 全部，照順序
-bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --status   # 只回報
-bash ~/twitter_pixiv_tg_bot/scripts/start-all.sh --restart  # 先停，再起
-```
-
----
-
-## 下載 APK
-
-需要的東西都附在 [最新的 release](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/latest) 上：
-
-| 檔案 | 大小 | 是什麼 |
+| 項目 | Windows | Android |
 | --- | --- | --- |
-| `bot-panel.apk` | 49 KB | 控制 App，由 `app/` 建置 |
-| `termux.apk` | 108.6 MB | Termux 本體（0.118.3，F-Droid 版） |
-| `termux-api.apk` | 3.8 MB | Termux:API —— 提供 `termux-wake-lock` |
-| `termux-boot.apk` | 25 KB | Termux:Boot —— 開機時啟動服務 |
-
-```bash
-adb install -r bot-panel.apk
-adb install -r termux.apk
-adb install -r termux-api.apk
-adb install -r termux-boot.apk
-```
-
-**Termux 本體是 108.6 MB**，超過 GitHub 對單一檔案 100 MB 的上限，所以它放在 release 裡而不是
-`apk/` 裡。另外三個兩邊都有；詳見 [apk/README.md](apk/README.md)。
-
-**每個 release 都保留該版本的 `bot-panel.apk`**，所以新版本出問題時還是能取得舊的建置。
-三個 Termux APK 在每個 release 裡都完全相同。
-
-有兩件事安裝程式做不到，而兩件都必須完成，App 才能啟動任何東西：
-
-```bash
-adb shell pm grant com.yunai.botpanel com.termux.permission.RUN_COMMAND
-```
-
-以及，在 Termux 裡執行一次：
-
-```bash
-bash ~/twitter_pixiv_tg_bot/scripts/enable-external-apps.sh
-```
+| **代理** | 從 `HKCU\...\Internet Settings` 讀取 | **沒有登錄檔**；只讀環境變數 |
+| **子行程的解譯器** | `sys._base_executable`，因為 venv 啟動器會多開一個主控台視窗 | `sys.executable` |
+| **分離行程** | `DETACHED_PROCESS \| CREATE_NO_WINDOW` | `start_new_session=True` |
+| **檔案鎖定** | `msvcrt.locking` | `fcntl.flock` |
+| **gallery-dl 名稱** | `gallery-dl.exe` 在 `PATH` 上 | 沒有副檔名，放在解譯器旁邊 |
+| **主控台編碼** | 需要修正代碼頁 | 已經是 UTF-8 |
 
 ---
 
-## 全部關閉
+## 疑難排解
 
-**電源 → 全部關閉（含面板）** 會先停機器人、再停伺服器、最後停面板自己，並回報接下來該做什麼。
-面板的網頁也有同樣的按鈕。
-
-**它被放在獨立的一區、遠離其他工具**，因為那個畫面上的其他東西都能從那個畫面復原 ——
-停了機器人，旁邊的按鈕就能再啟動它。**而這一個結束了 App 自己的用處**，因為面板是最後消失的東西。
-
-### 為什麼面板會先回應才死掉
-
-請求是透過 HTTP 進來的，而面板本身就是被停止的東西之一。**在還處理著請求的時候把它殺掉，
-會在回應寫出之前就關掉 socket**，App 就會對一個成功的動作回報失敗 ——
-**那是最糟的一種回饋，因為它會誘使使用者再按一次。**
-
-所以工作被交給一個**分離**的行程，它會等兩秒，而處理函式立刻回傳。
-實測：回應在 13 毫秒內送達、讀到的時候伺服器已經消失、面板自己則在兩秒後結束。
-
-**`start_new_session=True` 是讓子行程活下來的關鍵。** 沒有它，子行程會共用面板的工作階段，
-殺掉面板就會把子行程一起帶走，機器人與伺服器就會留在沒有面板可以控制的狀態。
-
-### 要回來不需要打任何字
-
-`POST /api/shutdown` 與按按鈕是同一條路徑，而復原靠的是 **一鍵啟動服務** 卡片，
-它會送出 `com.termux.RUN_COMMAND`、**不需要面板活著**。已驗證為完整循環：
-關閉、確認每個行程與兩個埠都不在了、然後只靠 intent 再啟動一次。
-
-```bash
-bash scripts/start-all.sh --stop      # 從終端機做同樣的事
-bash scripts/start-all.sh --status    # 只回報
-```
-
-`--stop` 以鏡像的理由反轉啟動順序：**先停機器人，再停它依賴的伺服器**，
-而面板最後才走，這樣控制介面會一直存在到最後一刻。
+| 症狀 | 先檢查什麼 |
+| --- | --- |
+| **圖片顯示不出來** | 按「重新生成」。keystamp 過期了 |
+| **tag 不更新** | 確認 `GALLERY_META_TTL_SECONDS=0`，看 log 有沒有「畫廊資料已過期」|
+| **中文標籤不對或缺** | 更新字典，見[更新標籤字典](#更新標籤字典) |
+| **停止按鈕沒反應** | 面板會顯示「目前沒有進行中的下載」嗎？那代表當時沒有可停的工作 |
+| **下載全部失敗在 `Connection refused`** | 梯子切成 TUN 了，把 `BOT_PROXY` 註解掉 |
+| **`apt` 說找不到 Release 檔** | 檢查 `apt.conf.d/95proxy` 是不是 `http://` |
+| **App 顯示「找不到面板」** | `bash control/run-panel.sh start` |
+| **App 的按鈕按了沒反應** | 權限與 `allow-external-apps` 都設好了嗎？（見[手機 App](#手機-app)）|
+| **機器人開機後死掉** | 梯子當時還沒起來。看 log 有沒有「等待 Telegram」 |
+| **面板的「梯子」顯示紅字** | 真的沒有 VPN 隧道也沒有代理埠 —— 開梯子 |
 
 ---
 
-## 套件漏洞檢查：`/audit`
+## 套件漏洞檢查
 
-**管理員指令。** 把目前裝的每一個套件拿去問 [OSV](https://osv.dev)（`pip-audit` 背後查的同一個資料庫），
-回報有問題的套件、修復版本，以及可以直接複製的升級指令。
+**管理員指令 `/audit`。** 把目前裝的每一個套件拿去問 [OSV](https://osv.dev)
+（`pip-audit` 背後查的同一個資料庫），回報有問題的套件、修復版本，以及可以直接複製的升級指令。
 
 ```
 🔍 套件漏洞檢查
@@ -619,110 +703,51 @@ python -m pip install -U certifi
 **失敗與乾淨是兩回事。** 查不到（代理掛掉、OSV 連不上）會明確說「這不代表沒有漏洞」，
 不會回一句看起來很安心的「沒有發現漏洞」—— 那是這裡唯一真正要避免的錯誤。
 
-## 圖片圖床與免費額度
-
-e-hentai 的內嵌圖片網址是用 `keystamp` 簽章的，**時效一過，整個頁面的圖片會一起失效** ——
-這正是「重新生成」按鈕存在的理由。
-
-**圖片會被複製到 Cloudflare R2**，那裡的物件沒有這種時效。頁面上的網址因此變成
-`https://img.ginka.uk/...`，不會再過期。
-
-### 額度上限
-
-R2 免費額度是**每月 10 GB 儲存空間**（對外流量免費、讀取在額度內免費），所以儲存是唯一可能產生帳單的部分。
-一本畫廊的顯示圖約 **30 MB**，大約可以放三百本。
-
-**上限設在額度的 95%（9.5 GB），而不是額度本身。** 儲存是按月、按物件存在的時間計費，
-所以剛好用到 10 GB、一週後才刪掉，那個月仍然超額。
-
-兩道檢查，因為它們回答不同的問題：
-
-| 時機 | 檢查 | 為什麼 |
-| --- | --- | --- |
-| **下載任何東西之前** | 桶裡已經存了多少 | 已經滿了就**直接拒絕** —— 抓 30 MB 下來才決定不上傳是浪費 |
-| **每張圖片上傳前** | 已存 + 這張 是否超額 | 第一道無法知道要上傳多少 —— 那只有下載了才知道 |
-
-**檢查在寫入之前執行** —— 已經上傳的就是已經計費的。
-
-用量是**詢問桶本身**，不是本地計數器：本地計數在你第一次從 Cloudflare 儀表板刪東西時就會漂移，
-之後它會拒絕本來放得下的、或放行本來放不下的。**讀不到用量時就不上傳** ——
-問「這會不會花錢」而答不出來時，安全的方向是不要動它。
-
-**兩種情況都會通知管理員**，因為達到上限是代替操作者做的決定，而結果是頁面少了一些圖片。
-
-可以在 `.env` 調整：
-
-```
-R2_FREE_BYTES=10000000000     # 免費額度，位元組（10 GB，十進位）
-R2_LIMIT_PERCENT=95           # 停止上限佔額度的百分比
-```
-
-**App 與面板都會顯示目前用量** —— 已用／總量、剩餘、物件數，以及一條 80% 轉黃、達到上限轉紅的進度條。
-
 ---
 
-## 致謝
+## 更新標籤字典
 
-[CREDITS.md](CREDITS.md) 列出了本專案建立的每一個專案 —— Termux 與它的 companion apps、
-proot-distro、Python 函式庫、TDLib、Android 建置工具 —— 附上各自專案頁面的連結、
-當時使用的版本，以及它在這裡做什麼。
+```bash
+# 1. 取得上游資料庫
+git clone --depth 1 https://github.com/EhTagTranslation/Database.git ../_ehtags
 
-如果你要重建這個專案，這些是該去的頁面：
+# 2. 重新產生
+python tools/build_tag_translations.py
+```
 
-| | |
-| --- | --- |
-| Termux | <https://github.com/termux/termux-app> · <https://termux.dev> · [F-Droid](https://f-droid.org/packages/com.termux/) |
-| Termux:API | <https://github.com/termux/termux-api> · [F-Droid](https://f-droid.org/packages/com.termux.api/) |
-| Termux:Boot | <https://github.com/termux/termux-boot> · [F-Droid](https://f-droid.org/packages/com.termux.boot/) |
-| python-telegram-bot | <https://github.com/python-telegram-bot/python-telegram-bot> · <https://python-telegram-bot.org> |
-| gallery-dl | <https://github.com/mikf/gallery-dl> |
-| httpx | <https://github.com/encode/httpx> |
-| Pillow | <https://github.com/python-pillow/Pillow> |
-| Cloudflare R2（boto3） | <https://developers.cloudflare.com/r2/> · <https://github.com/boto/boto3> |
-| **EhTagTranslation/Database** | <https://github.com/EhTagTranslation/Database> |
-| **OpenCC** | <https://github.com/BYVoid/OpenCC> |
-| Telegram Bot API server | <https://github.com/tdlib/telegram-bot-api> |
-| TDLib | <https://github.com/tdlib/td> |
-| proot-distro | <https://github.com/termux/proot-distro> |
-| Android SDK | <https://developer.android.com/studio#command-line-tools-only> |
-| Eclipse Temurin JDK | <https://adoptium.net> |
+輸出會列出每個命名空間的條數、新增與變更的數量。
 
-**除了 `apk/` 裡的 APK 之外，這裡沒有任何東西是打包進來的**，本專案也不隸屬於上述任何專案。
-
-> **`bot/tag_translations.py` 是衍生作品，授權為 CC BY-NC-SA 3.0**，不是本專案自己的條款。
-> 它由 [`tools/build_tag_translations.py`](tools/build_tag_translations.py) 從 EhTagTranslation 資料庫產生
-> （14,206 筆），上游文本本身又是 EHWiki 標籤頁面的翻譯，以相同授權再散布。
+> **這個工具曾經對全新的 clone 是壞的。** 上游把表格搬進了 `database/` 子目錄，
+> 而工具還讀根目錄，於是 `FileNotFoundError: _ehtags/character.md`。
+> **所以「更新字典」其實很久沒跑過 —— 不是沒更新，是跑不動。**
 >
-> **非商業條款正是它與個人使用相容、與拿來收費不相容的原因。** 如果你要商業使用，該看的就是那個檔案。
+> 現在兩種佈局都接受，因為佈局是上游專案的事，而上個月的 checkout 還是舊的。
+
+改完記得同步到另一個專案（見[兩個專案的關係](#兩個專案的關係)），然後升版。
 
 ---
 
-## 版本
+## 版本與發佈
 
 App、面板與腳本**共用一個版本號**，記錄在 [`VERSION.properties`](VERSION.properties)。
-App 的標題列會把自己的版本與面板的版本並排顯示，兩者都讀同一個檔案，**所以版本不一致是可見的，而不是謎團。**
+App 的標題列會把自己的版本與面板的版本並排顯示，**所以版本不一致是可見的，而不是謎團。**
 
 ```powershell
-powershell -File app/build.ps1 -Bump            # 1.4 -> 1.5   （新功能）
-powershell -File app/build.ps1 -Bump -Fix       # 1.4 -> 1.4.1 （只有修正）
+powershell -File app/build.ps1 -Bump            # 1.8 -> 1.9   （新功能）
+powershell -File app/build.ps1 -Bump -Fix       # 1.8 -> 1.8.1 （只有修正）
 powershell -File app/build.ps1                  # 用目前版本建置
 ```
 
 **只要功能有變動就升版。** `-Bump` 會在建置**之前**改寫 `VERSION.properties`，
-所以建置失敗時版本號仍然是升過的。建置也會在 App 原始碼自上次升版後有變動時**警告** ——
-那不是錯誤（失敗後重建是合理的），但提醒才是重點。
+所以建置失敗時版本號仍然是升過的。
 
-[VERSIONS.md](VERSIONS.md) 列出每個版本包含什麼，以及版本號用在哪裡。
+[VERSIONS.md](VERSIONS.md) 列出每個版本包含什麼。
 
----
-
-## 發佈 release
+### 發佈 release
 
 > ### **建立新的 release。永遠不要改名，永遠不要刪除。**
 >
 > Release 是已發佈的產物 —— 可能有人已經下載或正在跑它，而且 **GitHub 沒有復原功能。**
-
-[`tools/release.ps1`](tools/release.ps1) 讓正確的事變成一個指令：
 
 ```powershell
 ./tools/release.ps1 -List        # 每個 release、它的資產與下載次數
@@ -734,8 +759,7 @@ powershell -File app/build.ps1                  # 用目前版本建置
 **一個無法表達那個請求的工具，就不可能犯那個錯** —— 而那個錯這裡犯過一次，
 用的是單一個看起來無害的 `PATCH`。
 
-任何動到 release 的操作之後，請執行 `-Verify`。各項檢查涵蓋什麼、以及如果你繞過腳本直接打 API 會發生什麼，
-請見 [VERSIONS.md](VERSIONS.md#發佈-release)。
+**任何動到 release 的操作之後，請執行 `-Verify`。**
 
 ---
 
@@ -745,7 +769,6 @@ powershell -File app/build.ps1                  # 用目前版本建置
 
 Windows PowerShell 5.1 —— 也就是 `powershell` 執行的那個 —— 會把沒有 BOM 的 `.ps1` 當成 ANSI 讀取。
 檔案裡如果有破折號、省略號或任何中文，就會被逐位元組解碼成系統代碼頁，而**失敗不是外觀問題**：
-剖析器在原本是字串常值的地方看到壞掉的位元組，然後回報
 
 ```
 The string is missing the terminator: ".
@@ -761,4 +784,60 @@ python tools/check_encodings.py --fix    # 修復
 ```
 
 **任何改寫這些檔案的工具都可能弄掉 BOM** —— Python 裡一個普通的 `Path.write_text(..., "utf-8")` 就會。
-用編輯器以外的東西改過它們之後，請執行檢查。
+
+---
+
+## 兩個專案的關係
+
+**Windows 專案不會被這裡的任何東西改動**，本專案也不從它匯入任何東西。兩者靠**複製**共用同一份核心檔案：
+
+| | Windows 專案 | 本專案 |
+| --- | --- | --- |
+| 核心（`bot.py`、`ehentai.py`、`pixiv_login.py`、`tag_translations.py`）| 有 | 有 —— 複製品 |
+| `run_local_api.py`、`host_proxy_relay.py`、`run.bat`、Docker | 有 | **沒有** |
+| 啟動器 | `run.bat` | `scripts/run-bot.sh` |
+| 伺服器 | Docker + `run_local_api.py` | Linux chroot + `scripts/run-server.sh` |
+
+> **核心檔案是複製品，不是共用函式庫。** 在一邊修好的 bug，另一邊必須手動套用同樣的修正。
+> 兩邊都保留同一套特性測試正是為了這件事 —— **Android 482 項、Windows 468 項**，
+> 差的那幾項是無法套用的平台專屬斷言。
+
+---
+
+## 致謝
+
+[CREDITS.md](CREDITS.md) 列出了本專案建立的每一個專案 —— Termux 與它的 companion apps、
+proot-distro、Python 函式庫、TDLib、Android 建置工具 —— 附上各自專案頁面的連結、
+當時使用的版本，以及它在這裡做什麼。
+
+| | |
+| --- | --- |
+| Termux | <https://github.com/termux/termux-app> · <https://termux.dev> · [F-Droid](https://f-droid.org/packages/com.termux/) |
+| Termux:API | <https://github.com/termux/termux-api> · [F-Droid](https://f-droid.org/packages/com.termux.api/) |
+| Termux:Boot | <https://github.com/termux/termux-boot> · [F-Droid](https://f-droid.org/packages/com.termux.boot/) |
+| python-telegram-bot | <https://github.com/python-telegram-bot/python-telegram-bot> · <https://python-telegram-bot.org> |
+| gallery-dl | <https://github.com/mikf/gallery-dl> |
+| httpx | <https://github.com/encode/httpx> |
+| Pillow | <https://github.com/python-pillow/Pillow> |
+| Cloudflare R2（boto3）| <https://developers.cloudflare.com/r2/> · <https://github.com/boto/boto3> |
+| **EhTagTranslation/Database** | <https://github.com/EhTagTranslation/Database> |
+| **OpenCC** | <https://github.com/BYVoid/OpenCC> |
+| Telegram Bot API server | <https://github.com/tdlib/telegram-bot-api> |
+| TDLib | <https://github.com/tdlib/td> |
+| proot-distro | <https://github.com/termux/proot-distro> |
+| Android SDK | <https://developer.android.com/studio#command-line-tools-only> |
+| Eclipse Temurin JDK | <https://adoptium.net> |
+
+**除了 `apk/` 裡的 APK 之外，這裡沒有任何東西是打包進來的**，本專案也不隸屬於上述任何專案。
+
+---
+
+## 授權
+
+本專案自己的程式碼沒有宣告授權條款。
+
+> **`bot/tag_translations.py` 是衍生作品，授權為 CC BY-NC-SA 3.0**，不是本專案自己的條款。
+> 它由 [`tools/build_tag_translations.py`](tools/build_tag_translations.py) 從 EhTagTranslation 資料庫產生
+> （14,324 筆），上游文本本身又是 EHWiki 標籤頁面的翻譯，以相同授權再散布。
+>
+> **非商業條款正是它與個人使用相容、與拿來收費不相容的原因。**
