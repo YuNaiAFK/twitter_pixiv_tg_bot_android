@@ -936,6 +936,15 @@ ARCHIVE_CACHE_ENABLED = env_text("ARCHIVE_CACHE", "1").lower() not in {"0", "fal
 # failing.
 GALLERY_URL_TTL_SECONDS = env_number("GALLERY_URL_TTL_SECONDS", 2 * 3600)
 
+# **How long a gallery's facts may be shown without asking e-hentai again.**
+#
+# Separate from CACHE_STALE_SECONDS, which governs the whole payload for 14 days. That number is right
+# for the *sweep* - one request per page, about a minute for fifty pages - but it was also governing
+# the title, tags and rating, so a gallery whose tags were edited on e-hentai kept showing the old ones
+# for a fortnight. The two cost different things: re-reading the facts is one HTTP request, re-sweeping
+# is fifty. Six hours refreshes what changes while still making a repeat press free.
+GALLERY_META_TTL_SECONDS = env_number("GALLERY_META_TTL_SECONDS", 6 * 3600)
+
 
 # Hosts this bot fetches, and every alias that serves the same content. Verified against the
 # live sites rather than assumed:
@@ -5906,9 +5915,36 @@ async def handle_ehentai_gallery(message, url: str, user) -> bool:
         # per-page sweep is not, and that is what the cache mostly saves.
         cached = gallery_cache_lookup(url)
         gallery = gallery_from_payload(cached) if cached else None
+        age = None
         if gallery is not None:
             age = gallery_cache_age(url)
             logger.info("命中畫廊快取（%.0f 秒前）：%s", age or 0, url)
+
+        # **The facts go stale separately from the sweep.** Tags, title and rating change on e-hentai
+        # while the cached image URLs stay usable, and re-reading them costs one request against the
+        # sweep's fifty. So a cached gallery older than GALLERY_META_TTL_SECONDS has its metadata
+        # re-fetched and its image URLs kept - which is why this is a second lookup rather than a
+        # second store.
+        if (gallery is not None and age is not None
+                and age > GALLERY_META_TTL_SECONDS):
+            logger.info("畫廊資料已過期（%.0f 小時），重新取得：%s", age / 3600, url)
+            try:
+                fresh = await asyncio.to_thread(
+                    ehentai.fetch_gallery,
+                    url,
+                    cookies_path=resolve_ehentai_cookies(),
+                    timeout=float(EHENTAI_TIMEOUT_SECONDS),
+                )
+            except ehentai.EhentaiError as exc:
+                # The cached copy is still usable, and refusing the parse because a refresh failed
+                # would be a worse outcome than showing the older tags.
+                logger.warning("重新取得畫廊資料失敗，沿用快取：%s（%s）", url, exc)
+            else:
+                gallery = fresh
+                keep = (cached.get("display_urls"), cached.get("original_urls"))
+                await asyncio.to_thread(
+                    remember_gallery, url, gallery,
+                    keep if keep[0] else None)
 
         if gallery is None:
             gallery = await asyncio.to_thread(
@@ -6422,7 +6458,7 @@ async def notify_admins(bot, text: str, *, exclude: int = 0) -> int:
     return sent
 
 
-async def host_on_r2(embed: list, gallery, mode: str, status) -> list:
+async def host_on_r2(embed: list, gallery, mode: str, status, *, stop_event=None) -> list:
     """
     Copy the page's images into R2 and return the URLs to embed instead.
 
@@ -6521,6 +6557,10 @@ async def host_on_r2(embed: list, gallery, mode: str, status) -> list:
             # written. An upload that has happened is billed for the month.
             already_used=used_bytes,
             budget=allowance,
+            # The upload can run for minutes on a two-hundred page gallery, and it draws the stop
+            # button. Passing nothing here is why the button answered "目前沒有進行中的下載" and the
+            # upload continued - r2.upload_many has taken a stop_event all along.
+            stop_event=stop_event,
         )
     except r2.R2Error as exc:
         logger.warning("R2 上傳無法進行：%s；改用原始網址", exc)
@@ -6706,7 +6746,12 @@ async def run_gallery_images(message, status, gallery, mode: str,
     if reuse_page is None:
         # The sweep alone. The "歸檔" modes download through the same helper afterwards,
         # so a gallery already looked at costs no sweep there either.
-        display_urls, original_urls = await gallery_page_urls(gallery, status, False)
+        # One flag for both slow phases of this parse. The sweep can take a minute and the R2
+        # upload two, and neither used to register anything - so the stop button, which is on screen
+        # for both, answered "目前沒有進行中的下載" and the work continued.
+        parse_stop = threading.Event()
+        display_urls, original_urls = await gallery_page_urls(
+            gallery, status, False, stop_event=parse_stop)
 
         await status.edit_text(
             f"已取得 {len(display_urls)} 頁，正在建立 Telegraph 頁面……",
@@ -6723,7 +6768,7 @@ async def run_gallery_images(message, status, gallery, mode: str,
         # What goes into Telegraph is then an R2 object rather than a signed e-hentai link, so the
         # page keeps working after the keystamp lapses - which is the failure the 重新生成 button
         # exists to repair. Degrades to the original URLs whenever R2 is unavailable.
-        embed = await host_on_r2(embed, gallery, mode, status)
+        embed = await host_on_r2(embed, gallery, mode, status, stop_event=parse_stop)
 
         try:
             if cached_entry is not None:
@@ -7108,7 +7153,8 @@ def download_gallery_for_archive(image_urls: list[str], output_dir: Path, *,
 
 async def gallery_page_urls(gallery, status, original: bool,
                             *, label: str = "",
-                            force: bool = False) -> tuple[list[str], list[str]]:
+                            force: bool = False,
+                            stop_event=None) -> tuple[list[str], list[str]]:
     """
     Return (display_urls, original_urls) for a gallery, from the cache when possible.
 
@@ -7137,20 +7183,40 @@ async def gallery_page_urls(gallery, status, original: bool,
                     gallery.page_url)
         return display_urls, original_urls
 
-    display_urls, original_urls = await run_with_progress(
-        lambda report: ehentai.fetch_gallery_images(
-            gallery.page_url,
-            cookies_path=resolve_ehentai_cookies(),
-            timeout=float(EHENTAI_TIMEOUT_SECONDS),
-            workers=EHENTAI_VIEWER_WORKERS,
-            progress=report,
-        ),
-        status,
-        prefix=f"正在取得圖片清單{'（' + label + '）' if label else ''}……",
-        gid=gallery.gid,
-        token=gallery.token,
-        total=pages or 0,
-    )
+    # **Registered, or the stop button answers "目前沒有進行中的下載" and the sweep runs on.** This is
+    # the slowest phase of a Telegraph parse - one request per page - and it draws the button because
+    # run_with_progress is given a gid and token.
+    chat_id = getattr(status, "chat_id", 0) or 0
+    if stop_event is not None:
+        register_running_stop(chat_id, stop_event)
+    try:
+        display_urls, original_urls = await run_with_progress(
+            lambda report: ehentai.fetch_gallery_images(
+                gallery.page_url,
+                cookies_path=resolve_ehentai_cookies(),
+                timeout=float(EHENTAI_TIMEOUT_SECONDS),
+                workers=EHENTAI_VIEWER_WORKERS,
+                progress=report,
+                stop_event=stop_event,
+            ),
+            status,
+            prefix=f"正在取得圖片清單{'（' + label + '）' if label else ''}……",
+            gid=gallery.gid,
+            token=gallery.token,
+            total=pages or 0,
+        )
+    finally:
+        # Removed even when the sweep raised, so a stale flag cannot make a later stop claim to have
+        # stopped something it did not.
+        if stop_event is not None:
+            register_running_stop(chat_id, None)
+
+    # A stopped sweep returns a short list. Caching that would make the truncation permanent: the
+    # next press would read it back as "the gallery has N pages" and never ask again.
+    if stop_event is not None and stop_event.is_set():
+        logger.info("圖片清單掃描已被使用者停止：%s", gallery.page_url)
+        return display_urls, original_urls
+
     # Stored with the gallery, so a repeat of either action is free.
     await asyncio.to_thread(remember_gallery, gallery.page_url, gallery,
                             (display_urls, original_urls))

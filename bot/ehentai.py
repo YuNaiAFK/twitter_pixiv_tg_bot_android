@@ -847,6 +847,7 @@ def fetch_gallery_images(
     max_images: int = 500,
     progress=None,
     workers: int = 6,
+    stop_event=None,
 ) -> tuple[list[str], list[str]]:
     """
     Return (display_urls, original_urls) for every page of a gallery.
@@ -900,6 +901,8 @@ def fetch_gallery_images(
         pages = gallery_page_count(response.text, len(links))
         total_available = len(links)
         for page_index in range(1, pages):
+            if stop_event is not None and stop_event.is_set():
+                break
             try:
                 more = client.get(f"{url}?p={page_index}", headers=headers)
             except Exception as exc:  # noqa: BLE001
@@ -940,6 +943,10 @@ def fetch_gallery_images(
 
         def fetch_viewer(item):
             index, link = item
+            # Checked before the request, so a stop does not leave one more page in flight per
+            # worker. The pool is not killed - threads cannot be - but nothing new is requested.
+            if stop_event is not None and stop_event.is_set():
+                return index, None, None
             try:
                 viewer = client.get(link, headers=headers)
             except Exception as exc:  # noqa: BLE001
@@ -957,6 +964,10 @@ def fetch_gallery_images(
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             for index, display, original in pool.map(
                     fetch_viewer, enumerate(links)):
+                # And here, so a stopped sweep drains instead of iterating every remaining page's
+                # result. pool.map yields in order, so this returns as soon as a prefix is blocked.
+                if stop_event is not None and stop_event.is_set():
+                    break
                 with lock:
                     per_page[index] = (display, original)
                     done += 1
@@ -979,10 +990,11 @@ def fetch_gallery_images(
 
 
 def gallery_image_urls(url: str, *, cookies_path=None, timeout: float = 120.0,
-                       workers: int = 6, progress=None) -> tuple[list[str], list[str]]:
+                       workers: int = 6, progress=None,
+                       stop_event=None) -> tuple[list[str], list[str]]:
     """Thin alias kept so callers read as one operation."""
     return fetch_gallery_images(
-        url, cookies_path=cookies_path, timeout=timeout,
+        url, cookies_path=cookies_path, timeout=timeout, stop_event=stop_event,
         workers=workers, progress=progress,
     )
 
