@@ -67,6 +67,8 @@ but if you redistribute a bundled build, that licence applies to it.
 
 ## Tag translation data
 
+Current tables taken from EhTagTranslation/Database at commit `4f4ab9d` (2026-11-03).
+
 | project | page | what it does here |
 | --- | --- | --- |
 | **EhTagTranslation/Database** | <https://github.com/EhTagTranslation/Database> | the 14,206-entry tag dictionary behind `bot/tag_translations.py` |
