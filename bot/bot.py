@@ -959,7 +959,22 @@ GALLERY_URL_TTL_SECONDS = env_number("GALLERY_URL_TTL_SECONDS", 2 * 3600)
 GALLERY_CACHE_ENABLED = os.getenv(
     "GALLERY_CACHE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
-GALLERY_META_TTL_SECONDS = env_number("GALLERY_META_TTL_SECONDS", 6 * 3600)
+# **How long a gallery's facts may be shown without asking e-hentai again.**
+#
+# **The default is 0: always re-read.** An earlier default of six hours looked like a sensible
+# compromise and was not - it reproduced the very complaint it was meant to fix. Measured on the
+# device, with the six hour default in place:
+#
+#     22:13:56  命中畫廊快取（2853 秒前）
+#
+# 47 minutes old, so no refresh, so the previous tag list - for a gallery whose tags had just been
+# edited. The saving being defended was one HTTP request, against a sweep that costs fifty; that is not
+# a saving worth a stale answer.
+#
+# Set it higher only if request volume becomes a problem. Even at 0 the expensive parts are still
+# reused: the swept image list is governed separately by GALLERY_URL_TTL_SECONDS, and the Telegraph
+# page is reused from the entry regardless.
+GALLERY_META_TTL_SECONDS = env_number("GALLERY_META_TTL_SECONDS", 0)
 
 
 # Hosts this bot fetches, and every alias that serves the same content. Verified against the
