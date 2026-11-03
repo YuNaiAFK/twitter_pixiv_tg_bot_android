@@ -932,17 +932,32 @@ def _lock_waits_for_the_holder() -> bool:
                 note("the parent could not take the lock even with nothing else holding it")
                 return False
             vendor = HERE / "vendor"
+            # **The child announces itself before it touches the lock.** The parent used to sleep a
+            # fixed second on the assumption that the child would reach acquire() within it. Starting
+            # an interpreter and importing bot can take longer than that on a busy machine, and then
+            # the parent released first and the child acquired immediately - measured at 0.41s, which
+            # then failed "it never waited for the holder" for a reason that had nothing to do with
+            # the lock. Three consecutive runs gave pass, pass, fail.
             child = (
                 f"import sys, time; sys.path.insert(0, r'{HERE}');"
                 f"sys.path.insert(0, r'{vendor}');"
                 "import bot;"
                 f"bot.INSTANCE_LOCK_FILE = r'{lock_path}';"
+                "print('READY', flush=True);"
                 "t=time.monotonic(); got=bot.acquire_instance_lock(8.0);"
                 "print(got, round(time.monotonic()-t, 2))"
             )
             try:
                 proc = _sp.Popen([_sys.executable, "-c", child], stdout=_sp.PIPE,
                                  stderr=_sp.PIPE, text=True, encoding="utf-8")
+                # Wait for the announcement instead of guessing how long the import takes. The
+                # readline blocks as long as that takes; the sleep after it is the window in which
+                # the child is genuinely blocked on the lock.
+                announced = proc.stdout.readline().strip()
+                if announced != "READY":
+                    proc.kill()
+                    note(f"the child did not announce itself, it printed: {announced!r}")
+                    return False
                 _tm.sleep(1.0)
                 bot.release_instance_lock()
                 out, err = proc.communicate(timeout=30)
@@ -3667,24 +3682,21 @@ def _gallery_cache_can_be_switched_off() -> bool:
     GALLERY_CACHE=0 must stop both the read and the write, or it does nothing at all.
 
     Off is a real trade rather than a saving: the entry is kilobytes, and what it holds besides the
-    tags is the Telegraph page URL - which is what makes a re-parse reuse the page instead of
-    publishing a second one. So the check is that the switch works, not that off is better.
-    """
-    import importlib
-    import os
+    tags is the Telegraph page URL - the thing that makes a re-parse reuse the page instead of
+    publishing a second one. So this checks that the switch works, not that off is better.
 
-    saved = os.environ.get("GALLERY_CACHE")
+    **The flag is patched, not reloaded.** The first version called importlib.reload(bot) to pick up
+    the environment variable, which re-executes the whole module - and every module-level object with
+    it, including the instance lock. Another test then failed on a lock it could no longer acquire,
+    which is a fair complaint: a test must not rewrite the state the rest of the suite depends on.
+    """
+    saved = bot.GALLERY_CACHE_ENABLED
     try:
-        os.environ["GALLERY_CACHE"] = "0"
-        importlib.reload(bot)
-        if bot.GALLERY_CACHE_ENABLED:
-            note("GALLERY_CACHE=0 did not disable it")
-            return False
+        bot.GALLERY_CACHE_ENABLED = False
         if bot.gallery_cache_lookup("https://e-hentai.org/g/1/abc"):
             note("a lookup still returned a payload while the cache was off")
             return False
 
-        # The write must be skipped too, or the entry is rebuilt immediately and the switch is inert.
         class FakeGallery:
             page_url = "https://e-hentai.org/g/1/abc"
             gid = "1"
@@ -3697,11 +3709,7 @@ def _gallery_cache_can_be_switched_off() -> bool:
             return False
         return True
     finally:
-        if saved is None:
-            os.environ.pop("GALLERY_CACHE", None)
-        else:
-            os.environ["GALLERY_CACHE"] = saved
-        importlib.reload(bot)
+        bot.GALLERY_CACHE_ENABLED = saved
 
 
 def _result_message_helper_works() -> bool:
