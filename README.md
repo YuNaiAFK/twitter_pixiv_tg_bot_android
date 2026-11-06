@@ -373,8 +373,7 @@ R2_LIMIT_PERCENT=95
 | --- | --- | --- |
 | `REPLY_UNSUPPORTED_LINKS` | `0` | `0` = 不支援的連結完全靜默 |
 | `ATTACH_SOURCE_LINK` | `1` | 附上原始連結 |
-| `DELETE_STATUS_MESSAGE` | `1` | 完成後刪掉「正在解析……」那則 |
-| `DELETE_SOURCE_MESSAGE` | `1` | 刪掉原始的連結訊息 |
+| `DELETE_STATUS_MESSAGE` | `1` | 完成後刪除機器人送出的「正在解析……」提示；使用者原始訊息一律保留 |
 | `AUTH_GROUP_LOCKED` | `0` | `1` = 只允許授權過的群組 |
 
 ---

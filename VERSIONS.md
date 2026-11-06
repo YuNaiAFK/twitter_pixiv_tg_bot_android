@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.8.1（未發布）** | - | 修正成功後的訊息清理：只刪除機器人送出的處理提示，保留使用者貼出的原始連結訊息。 |
 | **1.8** | [v1.8](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.8) | **the tag dictionary is regenerated from a database that is current to the day**, and a gallery now shows its present tags rather than a cached set.  
 **Dictionary:** 14,206 → **14,324** entries. Upstream [EhTagTranslation/Database](https://github.com/EhTagTranslation/Database) was cloned at HEAD `4f4ab9d` (2026-11-03) and re-parsed: 118 new tags, 19 translation corrections, none removed. The corrections are the interesting half - `epsilon` was 伊普西龍 and is now 艾普西隆, `cid kagenou` was 暗影 and is now 希德·卡蓋諾（暗影）, because upstream maps the name rather than the alias.  
 **And the build tool was broken against a fresh clone.** Upstream moved the tables into a `database/` subdirectory; the tool still read them from the repository root and raised `FileNotFoundError: _ehtags/character.md`. It now accepts either layout, because the layout is theirs to change and a month-old checkout still uses the old one.  
