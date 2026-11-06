@@ -35,7 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
-| **1.8.1（未發布）** | - | 修正成功後的訊息清理：只刪除機器人送出的處理提示，保留使用者貼出的原始連結訊息。 |
+| **1.9** | [v1.9](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.9) | 訊息自動清理只刪除 bot 的處理提示；R2 上傳失敗時通知並自動重試，三輪失敗後讓使用者選擇繼續或停止，停止後中止該次 e-hentai 解析；相同內容不重複上傳。Pixiv 檔名改為「作品名稱_作品ID_p頁碼_畫師ID_畫師暱稱」，並修正 Ugoira ZIP 被忽略的問題：依影格資料轉為原始尺寸、完整影格的 GIF 後直接傳送，支援新格式快取。完整說明見 [v1.9 更新說明](docs/releases/v1.9.md)。 |
 | **1.8** | [v1.8](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.8) | **the tag dictionary is regenerated from a database that is current to the day**, and a gallery now shows its present tags rather than a cached set.  
 **Dictionary:** 14,206 → **14,324** entries. Upstream [EhTagTranslation/Database](https://github.com/EhTagTranslation/Database) was cloned at HEAD `4f4ab9d` (2026-11-03) and re-parsed: 118 new tags, 19 translation corrections, none removed. The corrections are the interesting half - `epsilon` was 伊普西龍 and is now 艾普西隆, `cid kagenou` was 暗影 and is now 希德·卡蓋諾（暗影）, because upstream maps the name rather than the alias.  
 **And the build tool was broken against a fresh clone.** Upstream moved the tables into a `database/` subdirectory; the tool still read them from the repository root and raised `FileNotFoundError: _ehtags/character.md`. It now accepts either layout, because the layout is theirs to change and a month-old checkout still uses the old one.  
@@ -58,6 +58,8 @@ Also: the adult-content notices are gone, the log's leftover thread dumps are cl
 
 1.1 and 1.2 were never published as releases - they existed only as commits. Their changes are in
 v1.3.
+
+先前未發布的 1.8.1 訊息清理修正已併入 v1.9。
 
 ## Publishing a release
 

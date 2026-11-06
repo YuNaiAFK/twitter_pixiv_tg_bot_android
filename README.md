@@ -779,6 +779,8 @@ powershell -File app/build.ps1                  # 用目前版本建置
 
 **任何動到 release 的操作之後，請執行 `-Verify`。**
 
+Android 功能或行為修改完成後，除了提交並推送 `main`，也要升版、重新建置 APK、將產物同步到 `apk/bot-panel.apk`，更新 `VERSIONS.md` 與繁體中文更新說明，再建立對應版本的 Release 並執行 `-Verify`。上傳完成後確認 `/releases/latest` 指向新版，並核對附件的版本、大小與 SHA-256；連接手機時也要同步程式、版本檔與 APK。只有原始碼提交完成，尚未建立新版 Release，不算完成 Android 發佈。
+
 ---
 
 ## 編輯 PowerShell 腳本
