@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.10.2** | [v1.10.2](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10.2) | 完整匿名管理員支援，並避免撤銷未授權群組時更動全域限制模式。 |
 | **1.10.1** | [v1.10.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10.1) | 辨識本群匿名管理員，支援不帶參數的 /grant 與 /revoke 管理本群授權；不授予全域管理權限。 |
 | **1.10** | [v1.10](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10) | Pixiv GIF 改用 MTProto，保留 .gif 檔名與內容，以一般文件 MIME 及強制文件旗標傳送；已由管理員實際確認桌面端顯示檔名、大小與下載按鈕。 |
 | **1.9.2** | [v1.9.2](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.9.2) | Pixiv 文件模式改為直接依來源網址強制套用，不受呼叫端傳入的媒體類型參數影響，GIF 也固定走文件傳送。 |
