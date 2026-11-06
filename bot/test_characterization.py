@@ -3258,12 +3258,15 @@ def _the_upload_stops_at_the_ceiling() -> bool:
     class FakeClient:
         def __init__(self):
             self.puts = []
+            self.objects = {}
 
-        def head_object(self, **k):
-            raise Exception("absent")
+        def list_objects_v2(self, **kwargs):
+            return {"Contents": [{"Key": key} for key in self.objects
+                                  if key.startswith(kwargs["Prefix"])]}
 
         def put_object(self, Bucket, Key, Body, **k):
             self.puts.append(len(Body))
+            self.objects[Key] = Body
             return {}
 
     class Settings:
@@ -3280,7 +3283,8 @@ def _the_upload_stops_at_the_ceiling() -> bool:
     MB = 1024 * 1024
     fake = FakeClient()
     bot.r2._make_client = lambda settings, timeout: fake
-    bot.r2.fetch_image = lambda url, **k: (b"x" * MB, "image/jpeg")
+    # 每張使用不同內容；相同圖片只應占用一個物件的額度。
+    bot.r2.fetch_image = lambda url, **k: (url.encode().ljust(MB, b"x"), "image/jpeg")
     try:
         urls = [f"https://example.com/{i}.jpg" for i in range(10)]
 
@@ -3301,6 +3305,7 @@ def _the_upload_stops_at_the_ceiling() -> bool:
 
         # Already over: nothing at all may be written.
         fake.puts.clear()
+        fake.objects.clear()
         over = bot.r2.upload_many(urls, settings=Settings(), workers=1,
                                   budget=8 * MB, already_used=9 * MB)
         if over.uploaded or fake.puts:
@@ -3310,6 +3315,7 @@ def _the_upload_stops_at_the_ceiling() -> bool:
 
         # And with no budget, everything goes: the check must not be on by accident.
         fake.puts.clear()
+        fake.objects.clear()
         unlimited = bot.r2.upload_many(urls, settings=Settings(), workers=1)
         if unlimited.uploaded != len(urls):
             note(f"without a budget only {unlimited.uploaded} of {len(urls)} were uploaded")
