@@ -313,7 +313,8 @@ if ($Create) {
     }
 
     $body = if ($Notes -and (Test-Path $Notes)) {
-        Get-Content $Notes -Raw
+        # 直接讀取 UTF-8 純字串，避免 Windows PowerShell 5.1 將檔案屬性序列化成 JSON 物件。
+        [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $Notes).Path, [System.Text.Encoding]::UTF8)
     } else {
         "See [VERSIONS.md](https://github.com/$Repo/blob/main/VERSIONS.md) for what changed in this version."
     }
