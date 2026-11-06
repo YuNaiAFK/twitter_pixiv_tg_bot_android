@@ -861,3 +861,7 @@ proot-distro、Python 函式庫、TDLib、Android 建置工具 —— 附上各�
 > （14,324 筆），上游文本本身又是 EHWiki 標籤頁面的翻譯，以相同授權再散布。
 >
 > **非商業條款正是它與個人使用相容、與拿來收費不相容的原因。**
+
+### Pixiv GIF 的桌面文件顯示
+
+Telegram Desktop 會把 MIME 為 image/gif 的文件也顯示成動畫卡片。因此 Pixiv GIF 改用 MTProto，以 application/octet-stream 與強制文件旗標傳送，保留 .gif 檔名及原始 GIF 內容；新解析與快取重送皆適用。請安裝 Telethon 與 python-socks[asyncio]，並在 .env 設定既有的 TELEGRAM_API_ID、TELEGRAM_API_HASH、BOT_TOKEN。登入工作階段儲存在 .mtproto/，與解析快取分開且不納入 Git。缺少設定或連線失敗時會回報失敗，不會降回動畫卡片重送。

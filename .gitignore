@@ -48,3 +48,6 @@ app/exp/
 
 # Written while a stop is in flight, so a start cannot race it.
 data/.shutting-down
+
+# MTProto bot 工作階段（含認證資訊）。
+.mtproto/

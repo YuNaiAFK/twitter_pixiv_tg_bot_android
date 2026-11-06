@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.10** | [v1.10](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10) | Pixiv GIF 改用 MTProto，保留 .gif 檔名與內容，以一般文件 MIME 及強制文件旗標傳送；已由管理員實際確認桌面端顯示檔名、大小與下載按鈕。 |
 | **1.9.2** | [v1.9.2](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.9.2) | Pixiv 文件模式改為直接依來源網址強制套用，不受呼叫端傳入的媒體類型參數影響，GIF 也固定走文件傳送。 |
 | **1.9.1** | [v1.9.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.9.1) | Pixiv 的靜態圖片、GIF 與影片一律以文件傳送，ZIP 合成後的 GIF 及快取重送也相同；關閉自動媒體類型偵測。文件相簿重試仍保留檔名與文件模式；GIF 文件過大時回報失敗，保留原始尺寸。 |
 | **1.9** | [v1.9](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.9) | 訊息自動清理只刪除 bot 的處理提示；R2 上傳失敗時通知並自動重試，三輪失敗後讓使用者選擇繼續或停止，停止後中止該次 e-hentai 解析；相同內容不重複上傳。Pixiv 檔名改為「作品名稱_作品ID_p頁碼_畫師ID_畫師暱稱」，並修正 Ugoira ZIP 被忽略的問題：依影格資料轉為原始尺寸、完整影格的 GIF 後直接傳送，支援新格式快取。完整說明見 [v1.9 更新說明](docs/releases/v1.9.md)。 |

@@ -116,7 +116,7 @@ else
     #
     # Each package is checked by importing it, so a re-run only fetches what is genuinely
     # absent, and a single failure does not stop the others.
-    for pkg in telegram httpx PIL gallery_dl dotenv; do
+    for pkg in telegram httpx PIL gallery_dl dotenv telethon python_socks; do
         if python -c "import $pkg" >/dev/null 2>&1; then
             skip "$pkg already installed"
             continue
@@ -126,6 +126,8 @@ else
             PIL)        pipname="pillow" ;;
             gallery_dl) pipname="gallery-dl" ;;
             dotenv)     pipname="python-dotenv" ;;
+            telethon)   pipname="Telethon>=1.42,<2" ;;
+            python_socks) pipname="python-socks[asyncio]>=2.7,<3" ;;
             *)          pipname="$pkg" ;;
         esac
         run python -m pip install "$pipname"
