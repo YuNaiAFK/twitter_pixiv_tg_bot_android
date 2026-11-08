@@ -393,4 +393,3 @@ proot-distro login botapi -- /usr/local/bin/telegram-bot-api ...
 然後 CMake 會記下 `-isystem /data/data/com.termux/files/usr/include`，建置就會用 Debian 的 gcc
 去編譯 Android/bionic 的標頭檔 —— 結果在 `sqlite3.c` 裡失敗，錯誤訊息是 `memccpy` 與 `strcasecmp`，
 **跟 sqlite 一點關係都沒有的檔案。**
-
