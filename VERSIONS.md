@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.15** | [v1.15](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.15) | 群組以 /publish 回覆 ZIP／CBZ 啟動製作，沿用私聊設定與確認流程；直接圖片製作仍限私聊。 |
 | **1.14** | [v1.14](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.14) | Telegraph 標題下方加入製作日期、自訂文字與連結，依發送者記憶並供下次自動套用。 |
 | **1.13** | [v1.13](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.13) | 管理員私聊解析 X／Twitter 後可確認傳送到頻道，5 分鐘未操作預設不傳送；一般使用者不顯示按鈕。 |
 | **1.12** | [v1.12](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.12) | 本機檔案製作限私聊，接收後先選擇是否上傳；作者、E站可各別設定超連結或保留普通文字。 |
