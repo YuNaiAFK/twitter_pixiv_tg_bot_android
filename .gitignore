@@ -51,3 +51,7 @@ data/.shutting-down
 
 # MTProto bot 工作階段（含認證資訊）。
 .mtproto/
+
+# 執行時登記的頻道
+channel_targets.json
+channel_targets.tmp

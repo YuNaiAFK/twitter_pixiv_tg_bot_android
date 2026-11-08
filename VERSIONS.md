@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.13** | [v1.13](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.13) | 管理員私聊解析 X／Twitter 後可確認傳送到頻道，5 分鐘未操作預設不傳送；一般使用者不顯示按鈕。 |
 | **1.12** | [v1.12](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.12) | 本機檔案製作限私聊，接收後先選擇是否上傳；作者、E站可各別設定超連結或保留普通文字。 |
 | **1.11.1** | [v1.11.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.11.1) | 本機檔案完成訊息附上排序後第一張圖片作為封面，保留標題與即時預覽連結。 |
 | **1.11** | [v1.11](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.11) | 新增本機圖片／ZIP／CBZ 上傳，使用 /publish 統一產生 1280px R2 圖片與依檔名排序的 Telegraph；支援取消、去重及失敗重試。 |
