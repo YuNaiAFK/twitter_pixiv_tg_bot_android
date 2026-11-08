@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.11** | [v1.11](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.11) | 新增本機圖片／ZIP／CBZ 上傳，使用 /publish 統一產生 1280px R2 圖片與依檔名排序的 Telegraph；支援取消、去重及失敗重試。 |
 | **1.10.4** | [v1.10.4](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10.4) | 補上 MTProto GIF 文件參照快取，重送不再重傳整檔；參照過期先刷新，必要時才重新上傳。 |
 | **1.10.3** | [v1.10.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10.3) | /grant 成功提示顯示五秒後自動刪除，只清除 bot 回覆；保留原始指令與寫入失敗警告。 |
 | **1.10.2** | [v1.10.2](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.10.2) | 完整匿名管理員支援，並避免撤銷未授權群組時更動全域限制模式。 |
