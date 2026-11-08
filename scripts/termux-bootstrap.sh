@@ -195,7 +195,7 @@ fi
 info "installing python, git and the Pillow build dependencies"
 # shellcheck disable=SC2086
 if ! apt-get install -y $APT_OPTS </dev/null \
-        python git clang make libjpeg-turbo libpng freetype openssl libffi proot-distro \
+        python git clang make libjpeg-turbo libpng freetype openssl libffi libarchive proot-distro \
         2>&1 | tail -n 20; then
     warn "apt-get install reported a problem"
 fi
@@ -229,7 +229,7 @@ python -m pip install --upgrade pip </dev/null 2>&1 | tail -n 2 || true
 #
 # It is harmless to attempt and pointless to fail on. Left in so the intent is visible, but it
 # can never stop the install. `pkg upgrade` is how pip is moved on Termux.
-if ! python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv 'Telethon>=1.42,<2' 'python-socks[asyncio]>=2.7,<3' </dev/null 2>&1 | tail -n 20; then
+if ! python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv 'Telethon>=1.42,<2' 'python-socks[asyncio]>=2.7,<3' 'libarchive-c>=5.3,<6' </dev/null 2>&1 | tail -n 20; then
     warn "pip install reported a problem"
 fi
 

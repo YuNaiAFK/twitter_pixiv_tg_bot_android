@@ -79,14 +79,14 @@ is_root() { [ "$(id -u)" = "0" ]; }
 
 say "Termux packages"
 if [ "$CHECK_ONLY" = "1" ]; then
-    for p in python clang libjpeg-turbo libpng freetype proot-distro; do
+    for p in python clang libjpeg-turbo libpng freetype libarchive proot-distro; do
         if dpkg -s "$p" >/dev/null 2>&1; then ok "$p installed"; else skip "$p missing"; fi
     done
 else
     run pkg update -y || warn "pkg update reported a problem; continuing"
     # The image libraries are Pillow's build dependencies: without them pip tries to compile
     # from source and fails on the missing headers rather than installing a wheel.
-    run pkg install -y python clang make libjpeg-turbo libpng freetype proot-distro git
+    run pkg install -y python clang make libjpeg-turbo libpng freetype libarchive proot-distro git
     ok "packages installed"
 fi
 
@@ -96,7 +96,7 @@ say "Python packages"
 if [ "$CHECK_ONLY" = "1" ]; then
     python - <<'PY' || true
 import importlib
-for name in ("telegram", "httpx", "PIL", "gallery_dl", "dotenv"):
+for name in ("telegram", "httpx", "PIL", "gallery_dl", "dotenv", "libarchive"):
     try:
         mod = importlib.import_module(name)
         print(f"    \033[32m✓\033[0m {name} {getattr(mod, '__version__', '')}")
@@ -116,7 +116,7 @@ else
     #
     # Each package is checked by importing it, so a re-run only fetches what is genuinely
     # absent, and a single failure does not stop the others.
-    for pkg in telegram httpx PIL gallery_dl dotenv telethon python_socks; do
+    for pkg in telegram httpx PIL gallery_dl dotenv telethon python_socks libarchive; do
         if python -c "import $pkg" >/dev/null 2>&1; then
             skip "$pkg already installed"
             continue
@@ -127,6 +127,7 @@ else
             gallery_dl) pipname="gallery-dl" ;;
             dotenv)     pipname="python-dotenv" ;;
             telethon)   pipname="Telethon>=1.42,<2" ;;
+            libarchive) pipname="libarchive-c>=5.3,<6" ;;
             python_socks) pipname="python-socks[asyncio]>=2.7,<3" ;;
             *)          pipname="$pkg" ;;
         esac

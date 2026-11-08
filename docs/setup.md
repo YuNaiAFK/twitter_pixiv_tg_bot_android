@@ -393,3 +393,9 @@ proot-distro login botapi -- /usr/local/bin/telegram-bot-api ...
 然後 CMake 會記下 `-isystem /data/data/com.termux/files/usr/include`，建置就會用 Debian 的 gcc
 去編譯 Android/bionic 的標頭檔 —— 結果在 `sqlite3.c` 裡失敗，錯誤訊息是 `memccpy` 與 `strcasecmp`，
 **跟 sqlite 一點關係都沒有的檔案。**
+
+## 7z 與 RAR 解壓元件
+
+在 Termux 執行 `pkg install libarchive`，再執行 `python -m pip install "libarchive-c>=5.3,<6"`。安裝與引導腳本已包含這兩項依賴。
+
+以串流逐張讀取圖片，不會直接還原壓縮檔內路徑；沿用原有張數、單張與解壓大小上限。加密、不完整分卷或無法解碼的壓縮檔會在原操作訊息顯示錯誤，請先提供完整且未加密的單一檔案。
