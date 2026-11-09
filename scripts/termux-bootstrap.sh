@@ -229,7 +229,7 @@ python -m pip install --upgrade pip </dev/null 2>&1 | tail -n 2 || true
 #
 # It is harmless to attempt and pointless to fail on. Left in so the intent is visible, but it
 # can never stop the install. `pkg upgrade` is how pip is moved on Termux.
-if ! python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv 'Telethon>=1.42,<2' 'python-socks[asyncio]>=2.7,<3' 'libarchive-c>=5.3,<6' </dev/null 2>&1 | tail -n 20; then
+if ! python -m pip install python-telegram-bot httpx pillow gallery-dl python-dotenv 'Telethon>=1.42,<2' 'python-socks[asyncio]>=2.7,<3' 'libarchive-c>=5.3,<6' 'qrcode>=8.2,<9' </dev/null 2>&1 | tail -n 20; then
     warn "pip install reported a problem"
 fi
 
