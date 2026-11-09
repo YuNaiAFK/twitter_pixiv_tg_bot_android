@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.20.3** | [v1.20.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.20.3) | 修正原標題建頁失敗：改以短網址建立後恢復原標題，保留全部圖片。 |
 | **1.20.2** | [v1.20.2](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.20.2) | 恢復 Android 專用啟動路徑，保留 EH 快取、儲存重試與發布條件修正；請使用此版取代 1.20.1。 |
 | **1.20.1** | [v1.20.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.20.1) | 修正 Telegraph 快取與儲存失敗重試，發布選項僅限顯示圖成功。 |
 | **1.20** | [v1.20](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.20) | EH Telegraph 完成後獨立確認發布至 EH 頻道，與 Twitter 分開設定。 |
