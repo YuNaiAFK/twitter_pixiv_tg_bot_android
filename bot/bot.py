@@ -58,15 +58,8 @@ import ehentai
 from tag_translations import translate_tag
 
 # Resolve .env beside this file, not beside the shell's current directory, so the
-# bot finds its credentials regardless of where a launcher starts it.
+# bot finds its credentials regardless of where run.bat or a shortcut starts it.
 BASE_DIR = Path(__file__).resolve().parent
-# **Two locations, project root first.** On Android the launcher scripts write .env at the
-# project root (``bot/.env`` would be an odd place to ask an operator to edit, and the setup
-# script creates it there), while the code sits in ``bot/``. Loading both means either
-# location works, and load_dotenv does not override a variable that is already set - so the
-# first file to define one wins, which is the project root. On the Windows build there is only
-# ``bot/../.env`` in practice, and this finds that too.
-load_dotenv(BASE_DIR.parent / ".env")
 load_dotenv(BASE_DIR / ".env")
 
 # -------------------- Configuration --------------------
@@ -140,8 +133,6 @@ def env_text(name: str, default: str = "") -> str:
     return text if text else default
 
 
-# The project directory: the parent of the directory this file lives in. Every relative path in
-# .env is relative to this, not to the process's working directory - see resolve_env_path.
 PROJECT_DIR = BASE_DIR.parent
 
 
@@ -339,7 +330,6 @@ EHENTAI_NAMESPACE_LABELS = ehentai.NAMESPACE_LABELS
 #
 # **Deliberately not NAMESPACE_ORDER.** That one is shared with the Telegraph page and puts artist
 # second; this message puts 原作 and 角色 before it, because that is the order the format asked for.
-# Reusing the shared constant would have rearranged the page too, which nobody asked for.
 GALLERY_INFO_ORDER = [
     "language", "parody", "character", "artist", "group",
     "female", "male", "mixed", "other", "cosplayer", "reclass", "temp",
@@ -348,18 +338,9 @@ GALLERY_INFO_ORDER = [
 # Traditional Chinese only - no "語言 / Language". The chat message is read at a glance, and a second
 # label on every line is noise when the first one already says what it is.
 GALLERY_INFO_LABELS = {
-    "language": "語言",
-    "parody": "原作",
-    "character": "角色",
-    "artist": "藝術家",
-    "group": "社團",
-    "female": "女性",
-    "male": "男性",
-    "mixed": "混合",
-    "other": "其他",
-    "cosplayer": "Cosplayer",
-    "reclass": "重新分類",
-    "temp": "暫存",
+    "language": "語言", "parody": "原作", "character": "角色", "artist": "藝術家",
+    "group": "社團", "female": "女性", "male": "男性", "mixed": "混合",
+    "other": "其他", "cosplayer": "Cosplayer", "reclass": "重新分類", "temp": "暫存",
 }
 
 # -------------------- Supported sites --------------------
@@ -429,7 +410,7 @@ GALLERY_DL_CACHE_DIR = env_text("GALLERY_DL_CACHE", ".gallery-dl-cache")
 # with an OAuth refresh token rather than a cookie. A PHPSESSID cookie alone is
 # enough for pixiv.net's own web endpoints but not for this extractor, so the
 # token is configured separately. Obtain it once with:
-#     gallery-dl oauth:pixiv
+#     .venv\Scripts\gallery-dl.exe oauth:pixiv
 PIXIV_REFRESH_TOKEN = os.getenv("PIXIV_REFRESH_TOKEN", "").strip()
 
 # Telegram hard limits, independent of MAX_UPLOAD_MB.
@@ -934,13 +915,9 @@ ARCHIVE_CACHE_ENABLED = env_text("ARCHIVE_CACHE", "1").lower() not in {"0", "fal
 # failing.
 GALLERY_URL_TTL_SECONDS = env_number("GALLERY_URL_TTL_SECONDS", 2 * 3600)
 
-# **How long a gallery's facts may be shown without asking e-hentai again.**
-#
-# Separate from CACHE_STALE_SECONDS, which governs the whole payload for 14 days. That number is right
-# for the *sweep* - one request per page, about a minute for fifty pages - but it was also governing
-# the title, tags and rating, so a gallery whose tags were edited on e-hentai kept showing the old ones
-# for a fortnight. The two cost different things: re-reading the facts is one HTTP request, re-sweeping
-# is fifty. Six hours refreshes what changes while still making a repeat press free.
+# How long a gallery's facts may be shown without asking e-hentai again. Separate from
+# CACHE_STALE_SECONDS, which governs the whole payload for 14 days - right for the sweep (fifty
+# requests) and wrong for the tags (one).
 # Whether an e-hentai gallery's facts, swept image list and Telegraph page record are kept.
 #
 # **Off is a real trade, not a saving.** The entry is about 9 KB - the 92 MB that used to sit on disk
@@ -957,21 +934,13 @@ GALLERY_URL_TTL_SECONDS = env_number("GALLERY_URL_TTL_SECONDS", 2 * 3600)
 GALLERY_CACHE_ENABLED = os.getenv(
     "GALLERY_CACHE", "1").strip().lower() not in {"0", "false", "no", "off"}
 
-# **How long a gallery's facts may be shown without asking e-hentai again.**
+# How long a gallery's facts may be shown without asking e-hentai again.
 #
-# **The default is 0: always re-read.** An earlier default of six hours looked like a sensible
-# compromise and was not - it reproduced the very complaint it was meant to fix. Measured on the
-# device, with the six hour default in place:
-#
-#     22:13:56  命中畫廊快取（2853 秒前）
-#
-# 47 minutes old, so no refresh, so the previous tag list - for a gallery whose tags had just been
-# edited. The saving being defended was one HTTP request, against a sweep that costs fifty; that is not
-# a saving worth a stale answer.
-#
-# Set it higher only if request volume becomes a problem. Even at 0 the expensive parts are still
-# reused: the swept image list is governed separately by GALLERY_URL_TTL_SECONDS, and the Telegraph
-# page is reused from the entry regardless.
+# The default is 0: always re-read. A six hour default looked like a sensible compromise and
+# reproduced the complaint - measured on the device, "命中畫廊快取（2853 秒前）", 47 minutes old, no
+# refresh, previous tag list. The saving was one HTTP request against a sweep that costs fifty.
+# The expensive parts are still reused: the sweep has GALLERY_URL_TTL_SECONDS, and a refresh carries
+# the cached image urls over.
 GALLERY_META_TTL_SECONDS = env_number("GALLERY_META_TTL_SECONDS", 0)
 
 
@@ -1571,8 +1540,8 @@ async def update_result_message(message, text: str, *, reply_markup=None,
 
         TypeError: Message.edit_caption() got an unexpected keyword argument 'link_preview_options'
 
-    and TypeError is not a TelegramError, so it went straight through the handler below and out
-    as 處理更新時發生未預期錯誤. Eleven of those in one log.
+    and TypeError is not a TelegramError, so it went straight through the handler below and out as
+    處理更新時發生未預期錯誤. Eleven of those in one log.
 
     Returns whether the message was updated. Callers may send a new message on False.
     """
@@ -1826,12 +1795,7 @@ def gallery_cache_key(url: str, gallery=None) -> str:
 
 
 def gallery_cache_lookup(url: str, gallery=None) -> dict:
-    """
-    The cached payload for a gallery under its canonical key, or an empty dict.
-
-    An empty dict is also what GALLERY_CACHE=0 returns, which sends the caller down its cold path: a
-    fresh metadata read, a fresh sweep, and a new Telegraph page.
-    """
+    """The cached payload for a gallery, or an empty dict when GALLERY_CACHE=0."""
     if not GALLERY_CACHE_ENABLED:
         return {}
     return PARSE_CACHE.lookup(gallery_cache_key(url, gallery), kind="gallery") or {}
@@ -1854,11 +1818,6 @@ def gallery_cache_payload(gallery, image_urls=None, telegraph=None) -> dict:
     stays valid for a short while. That is acceptable because the cache expires on
     its own, and because the "重新生成" button is the supported way to refresh a page
     whose links have died.
-
-    ``telegraph`` is the pages already published for this gallery, keyed by mode. It is what lets a
-    link that was parsed before reuse the page made last time instead of building a second one -
-    and it is stored here, on disk, rather than in the button's in-memory entry, so it survives a
-    restart.
     """
     import dataclasses
 
@@ -1895,9 +1854,9 @@ def cached_telegraph_entry(url: str, gallery, mode: str) -> dict | None:
     """
     The Telegraph page recorded for this gallery and mode, or None.
 
-    Keyed by mode. There is only one Telegraph mode now - the original-resolution page was removed
-    because it embedded the full-resolution files - but the keying is kept: a "顯示圖" page must not
-    be handed back for any other mode, and the archive modes share this cache.
+    Keyed by mode because the two are different pages with different content: "顯示圖" embeds the
+    web-sized image and "原圖" the full-resolution file, so a page built for one must not be handed
+    back for the other.
 
     Returns the stored dict - url, path, access_token, and the sampled image URLs - not a
     TelegraphPage, because the caller also needs the samples to decide whether it still works.
@@ -2006,11 +1965,10 @@ def remember_gallery(url: str, gallery, image_urls=None) -> None:
     storing by the request URL produced two entries for one gallery.
     """
     if not GALLERY_CACHE_ENABLED:
-        # The entry would be rebuilt on the next parse anyway, so storing it would make the setting
-        # do nothing at all - which is worse than either answer.
         return
-    PARSE_CACHE.store(gallery_cache_key(url, gallery), "gallery",
-                      gallery_cache_payload(gallery, image_urls))
+    payload = dict(gallery_cache_lookup(url, gallery))
+    payload.update(gallery_cache_payload(gallery, image_urls))
+    PARSE_CACHE.store(gallery_cache_key(url, gallery), "gallery", payload)
     if PARSE_CACHE.needs_pruning():
         removed = PARSE_CACHE.prune()
         if removed:
@@ -2080,11 +2038,8 @@ def is_safe_to_clear(path: Path) -> bool:
     clear`` walk a whole drive. That is a one-character typo away from unrecoverable, so the
     check is explicit and refuses rather than trusting the setting.
 
-    Refused: a drive root, the Windows directory, a user profile root, the project directory
-    itself, and anything outside the project.
-
-    The boundary is the **project directory**, so `<project>/.cache` and `<project>/.cache/archives`
-    both pass - which they must, because that is where the cache goes.
+    Refused: a drive root, the Windows directory, a user profile root, the project root, and
+    anything that is not inside the project.
     """
     try:
         resolved = path.resolve()
@@ -2093,19 +2048,11 @@ def is_safe_to_clear(path: Path) -> bool:
     if resolved == Path(resolved.anchor):
         return False
 
-    # **The project directory, not BASE_DIR.** BASE_DIR is where bot.py lives - `bot/` - but the
-    # cache belongs beside .env at the project root, which is where the settings point it and where
-    # the parse cache already is. Checking against `bot/` refused the correct location, so
-    # /cache clear answered "已拒絕清除：快取路徑看起來不安全" as soon as .cache existed.
     base = PROJECT_DIR.resolve()
     if resolved == base:
         # Emptying the project directory would delete the bot itself.
         return False
 
-    # **And the directory the code lives in.** Widening the boundary to the project directory made
-    # `bot/` an allowed path, which it must never be: it holds bot.py, so emptying it deletes the bot.
-    # Caught by the test that was written when `bot/` was the outermost directory this check knew
-    # about. The cache belongs at `<project>/.cache`, which is neither of these.
     if resolved == BASE_DIR.resolve():
         return False
 
@@ -2749,35 +2696,6 @@ def acquire_instance_lock(timeout: float) -> bool:
         return True
 
 
-def enable_thread_dumps() -> bool:
-    """
-    Print every thread's stack on a timer, when DEBUG_TRACEBACK_SECONDS is set.
-
-    **For diagnosing a hang, not for running with.** The bot once stopped mid-sweep with the event
-    loop in epoll_wait and the only worker thread in futex_wait_queue_me, which says it was waiting
-    on something that is neither CPU work nor a pending thread job - and nothing observable from
-    outside the process could say which await it was. A periodic dump names the line.
-
-    Off unless the variable is set, and the interval is clamped to something that cannot flood a
-    log: this is scaffolding to be removed once the fault is understood, not a feature.
-    """
-    import faulthandler
-
-    try:
-        seconds = int(env_number("DEBUG_TRACEBACK_SECONDS", 0))
-    except Exception:  # noqa: BLE001
-        seconds = 0
-    if seconds <= 0:
-        return False
-    seconds = max(15, seconds)
-    # repeat=True so a hang that lasts hours keeps reporting; file=sys.stderr so it joins the log
-    # rather than the status output.
-    import sys
-    faulthandler.dump_traceback_later(seconds, repeat=True, file=sys.stderr)
-    logger.warning("已啟用執行緒堆疊定期輸出（每 %d 秒）—— 這是診斷用途", seconds)
-    return True
-
-
 def release_instance_lock() -> None:
     """Release the single-instance lock, so the next start does not have to wait."""
     global _instance_lock_handle
@@ -2866,34 +2784,6 @@ def source_link_options() -> LinkPreviewOptions:
 
 # -------------------- Login credentials --------------------
 
-def resolve_relative_path(raw: str) -> Path | None:
-    """
-    Resolve a path from `.env`, checking the project root before `BASE_DIR`.
-
-    **A relative path like `cookies/twitter.txt` is ambiguous, and the wrong answer is silent.**
-    ``BASE_DIR`` is this file's directory, so a bare relative path became
-    ``..../twitter_pixiv_tg_bot/bot/cookies/twitter.txt`` - but the cookies live beside `.env`
-    at the project root, where the installer puts them and where the README says to look. The
-    bot then reported "Cookie 檔不存在" and carried on with X and e-hentai **not logged in**,
-    which is a working bot with two of its three features quietly disabled.
-
-    Both locations are tried, project root first, so either layout works. Windows has the same
-    structure and is unaffected: its `cookies/` is also at the project root.
-
-    Returns the first that exists, or None so the caller can report the paths it tried.
-    """
-    if not raw:
-        return None
-    path = Path(raw).expanduser()
-    if path.is_absolute():
-        return path if path.exists() else None
-    for base in (BASE_DIR.parent, BASE_DIR):
-        candidate = base / path
-        if candidate.exists():
-            return candidate
-    return None
-
-
 def resolve_cookie_file(platform: str) -> Path | None:
     """
     Return the cookie file to use for `platform`, or None when none is set.
@@ -2909,18 +2799,16 @@ def resolve_cookie_file(platform: str) -> Path | None:
         candidates.append(PIXIV_COOKIES_FILE)
     candidates.append(COOKIES_FILE)
 
-    tried = []
     for raw in candidates:
         if not raw:
             continue
-        path = resolve_relative_path(raw)
-        if path is not None:
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = BASE_DIR / path
+        if path.is_file():
             return path
-        tried.append(str(BASE_DIR.parent / Path(raw).expanduser())
-                     if not Path(raw).expanduser().is_absolute() else raw)
+        logger.warning("Cookie 檔案不存在，已略過：%s", path)
 
-    if tried:
-        logger.warning("Cookie 檔案不存在，已略過：%s", "、".join(tried))
     return None
 
 
@@ -2944,20 +2832,15 @@ def resolve_ehentai_cookies() -> Path | None:
 
     Kept separate from resolve_cookie_file because e-hentai is discovered by URL
     shape rather than by detect_media_platform, so it needs its own lookup.
-
-    Uses ``resolve_relative_path`` so a relative setting works from either the project root or
-    ``bot/`` - see that function for why the old `BASE_DIR / path` produced a silent
-    "Cookie 檔不存在" and left e-hentai limited to public galleries.
     """
     if not EHENTAI_COOKIES_FILE:
         return None
-    path = resolve_relative_path(EHENTAI_COOKIES_FILE)
-    if path is not None:
+    path = Path(EHENTAI_COOKIES_FILE).expanduser()
+    if not path.is_absolute():
+        path = BASE_DIR / path
+    if path.is_file():
         return path
-    logger.warning("EHENTAI_COOKIES 指定的檔案不存在：%s",
-                   BASE_DIR.parent / EHENTAI_COOKIES_FILE
-                   if not Path(EHENTAI_COOKIES_FILE).expanduser().is_absolute()
-                   else EHENTAI_COOKIES_FILE)
+    logger.warning("EHENTAI_COOKIES 指定的檔案不存在：%s", path)
     return None
 
 
@@ -3399,28 +3282,15 @@ def credential_summary() -> str:
 
 def find_executable() -> str:
     """
-    Locate gallery-dl, preferring the copy installed beside this interpreter.
-
-    **The interpreter's own directory is checked first, without a hard-coded ``.exe``.** Two
-    separate problems are solved by that:
-
-    * On Windows the venv's ``Scripts`` directory is not always on ``PATH``, and
-      ``shutil.which`` alone then finds nothing - or worse, finds an unrelated system-wide
-      copy.
-    * On Android the console script has **no** extension, and a Termux session started as a
-      service has a minimal ``PATH``. Hard-coding ``gallery-dl.exe`` as the only candidate, as
-      this used to, meant the lookup could never succeed there.
-
-    Checking both names in the interpreter's directory covers either convention, so the same
-    code is correct on both platforms and this file needs no branch at all.
+    Locate gallery-dl. Prefer the running interpreter's own Scripts directory so
+    a venv install wins over an unrelated system-wide copy.
     """
-    directory = Path(sys.executable).parent
-    for name in ("gallery-dl", "gallery-dl.exe"):
-        candidate = directory / name
-        if candidate.is_file():
-            return str(candidate)
+    name = "gallery-dl.exe" if os.name == "nt" else "gallery-dl"
+    candidate = Path(sys.executable).parent / name
+    if candidate.is_file():
+        return str(candidate)
 
-    executable = shutil.which("gallery-dl") or shutil.which("gallery-dl.exe")
+    executable = shutil.which("gallery-dl")
     if not executable:
         raise RuntimeError(
             "找不到 gallery-dl，請執行：python -m pip install -U gallery-dl"
@@ -3681,11 +3551,7 @@ def admin_hint(platform: str | None = None) -> str:
     that answer was being discarded, so an operator chasing a deleted work was sent to
     re-do an OAuth flow that was never the problem.
     """
-    # **Built from what is actually on this machine.** The Windows build hard-codes
-    # ``.venv\Scripts\python.exe``, which does not exist on Android - an operator following
-    # that advice would be sent to a file that is not there, which is worse than no advice.
-    # ``platform_support`` knows the real interpreter and the real project directory.
-    command = f"{sys.executable} {BASE_DIR / 'bot.py'} --check"
+    command = ".venv\\Scripts\\python.exe bot.py --check"
 
     # A cause gallery-dl named itself. The credential advice is not repeated for these,
     # because none of them is a credential problem.
@@ -3707,7 +3573,7 @@ def admin_hint(platform: str | None = None) -> str:
     if platform == "pixiv":
         return (
             "Pixiv 取不到內容，且 gallery-dl 未回報明確原因。可能是憑證問題：\n"
-            f"1) 執行 {find_executable()} oauth:pixiv\n"
+            "1) 執行 .venv\\Scripts\\gallery-dl.exe oauth:pixiv\n"
             "2) 把瀏覽器網址列裡 code= 之後的值填入 .env 的 PIXIV_REFRESH_TOKEN\n"
             f"3) 執行 {command} 驗證"
         )
@@ -3812,12 +3678,7 @@ def detached_interpreter() -> str:
     ``sys._base_executable`` is the real interpreter and starts with no window. The base
     interpreter does not know about the venv, so ``child_environment()`` adds the venv's
     ``site-packages`` - without it the child cannot import ``telegram`` and dies at once.
-
-    **On Android none of that applies.** There is no venv launcher stub and no console, so
-    ``sys.executable`` is both the direct answer and the correct one.
     """
-    if os.name != "nt":
-        return sys.executable
     exe = getattr(sys, "_base_executable", None) or sys.executable
     if not os.path.exists(exe):
         exe = sys.executable
@@ -3828,22 +3689,18 @@ def child_environment(**extra: str) -> dict[str, str]:
     """
     An environment for a child process started with ``detached_interpreter()``.
 
-    Carries whatever ``extra`` names, plus the package directories on ``PYTHONPATH`` so a
-    child started from a different working directory still resolves them.
+    Carries whatever ``extra`` names, plus the venv on ``PYTHONPATH`` so the base interpreter
+    resolves the installed packages.
     """
     env = {**os.environ, **extra}
-    # site-packages on Windows, plus the project's own directory on Android - a Termux
-    # service starts in $HOME, so a child would not find ``bot.platform_support`` otherwise.
-    wanted = [p for p in sys.path
-              if p and (p.endswith("site-packages") or Path(p) == BASE_DIR)]
-    parts = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
-    for path in wanted:
-        if path not in parts and os.path.isdir(path):
-            parts.append(path)
-    if parts:
+    site_packages = [p for p in sys.path if p.endswith("site-packages") and os.path.isdir(p)]
+    if site_packages:
+        parts = [p for p in env.get("PYTHONPATH", "").split(os.pathsep) if p]
+        for path in site_packages:
+            if path not in parts:
+                parts.append(path)
         env["PYTHONPATH"] = os.pathsep.join(parts)
-    if os.name == "nt":
-        env["VIRTUAL_ENV"] = sys.prefix
+    env["VIRTUAL_ENV"] = sys.prefix
     return env
 
 
@@ -3898,17 +3755,10 @@ def spawn_replacement_process() -> subprocess.Popen:
     # CREATE_NO_WINDOW is not used: it gives a console (so an accidental print cannot fail,
     # which was its purpose) but no window, which is the empty-window problem in another
     # form. CREATE_NEW_PROCESS_GROUP so a Ctrl+C aimed at the old console misses this one.
-    #
-    # **On Android there is no console at all**, so none of those flags exist and none are
-    # wanted: the replacement writes to restart.log exactly as the log-only branch below does,
-    # and ``start_new_session`` is what keeps it alive when the parent's session ends.
     use_console = os.name == "nt"
     flags = subprocess.CREATE_NEW_CONSOLE if use_console else 0
     if use_console:
         flags |= subprocess.CREATE_NEW_PROCESS_GROUP
-
-    # POSIX detachment needs no flag; it is a Popen argument.
-    detach_kwargs = {} if os.name == "nt" else {"start_new_session": True}
 
     # The log must be UTF-8 regardless of the machine's locale. Without this the
     # replacement wrote the log in the system code page (cp936 here), so the file
@@ -3964,8 +3814,6 @@ def spawn_replacement_process() -> subprocess.Popen:
                 close_fds=True,
                 env=environment,
             )
-        # Android and other POSIX hosts: no console, so the output goes to the log, and
-        # start_new_session detaches it from whatever launched this process.
         return subprocess.Popen(
             [child_python, str(BASE_DIR / "bot.py")],
             cwd=str(BASE_DIR),
@@ -3977,7 +3825,6 @@ def spawn_replacement_process() -> subprocess.Popen:
             env=environment,
             encoding="utf-8",
             errors="replace",
-            **detach_kwargs,
         )
     finally:
         log_handle.close()
@@ -4053,45 +3900,16 @@ async def cache_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                          if ARCHIVE_CACHE_DIR.is_dir() else [])
         removed = await asyncio.to_thread(delete_files_quietly, cached_files)
         archives = await asyncio.to_thread(delete_files_quietly, archive_files)
-
-        # **The in-memory state has to go too.** The disk cache was deleted while the 重新生成 map
-        # kept its entries, so the button still worked from memory after a clear that says it
-        # cleared everything. Nothing here is expensive to rebuild.
-        regenerated = len(_regenerate_cache)
-        _regenerate_cache.clear()
-        memo = len(ehentai._cookie_header_cache)
-        ehentai._cookie_header_cache.clear()
-
         PARSE_CACHE.entries.clear()
-        PARSE_CACHE.hits = 0
-        PARSE_CACHE.misses = 0
-        parse_file = "（檔案不存在）"
         try:
-            if PARSE_CACHE.path.exists():
-                size = PARSE_CACHE.path.stat().st_size
-                PARSE_CACHE.path.unlink()
-                parse_file = f"{size / 1024:.1f} KB"
-            else:
-                parse_file = "（檔案不存在）"
-        except OSError as exc:
-            parse_file = f"刪除失敗：{exc}"
-
-        # Files whose cache entry is gone have nothing pointing at them, and this is the one moment
-        # they are certainly unwanted. Called after the entry file is removed so it sees the truth.
-        orphans = await asyncio.to_thread(prune_orphaned_cache_files)
-
-        parts = [
-            "已清除全部快取：",
-            f"• 解析快取檔：{parse_file}",
-            f"• 快取目錄：{removed} 個檔案",
-            f"• 歸檔快取：{archives} 個檔案",
-            f"• 無主檔案：{orphans} 個",
-            f"• 重新生成對應：{regenerated} 筆（記憶體）",
-            f"• Cookie 備忘：{memo} 筆（記憶體）",
-            "",
-            "下次解析會重新下載，並重新上傳到 R2。",
-        ]
-        await message.reply_text("\n".join(parts))
+            PARSE_CACHE.path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        await message.reply_text(
+            f"已清除解析快取：{removed} 個檔案。\n"
+            f"已清除歸檔快取：{archives} 個檔案。\n"
+            "下次解析會重新下載。"
+        )
         return
 
     size_kb = 0
@@ -4390,16 +4208,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         + (f"（自架伺服器：{'本機模式' if can_upload_by_path() else '遠端模式'}）"
            if LOCAL_API_SERVER else "（公開 API）"),
         f"• 連結冷卻時間：{USER_COOLDOWN_SECONDS} 秒（按鈕不受此限制）",
-        # Where the R2 ceiling sits. Reported here rather than only in the log because the operator
-        # is the one who has to clear space or raise it, and a limit they cannot see is one they
-        # will discover by having an upload refused.
-        *([f"• R2 圖床：免費額度 {r2.format_bytes(r2.free_bytes())}，"
-           f"停止上限 {r2.format_bytes(r2.limit_bytes())}"
-           f"（{r2.limit_percent():.0f}%）"]
-          if r2.r2_settings() else ["• R2 圖床：未設定（頁面圖片會使用會過期的原始網址）"]),
         "• 同一使用者同時只能有一個請求在處理中",
-        # The operator is the only one who sees this message, and /audit is the answer to "is
-        # anything I depend on known-broken" - naming it here is how they find out it exists.
         "• 套件漏洞檢查：/audit",
     ]
     if BLOCKED_USER_IDS:
@@ -4968,27 +4777,14 @@ def system_proxy_url() -> str:
 
     An explicit environment variable wins, so a user can override or disable this without
     touching the registry.
-
-    **Android has no registry**, so on a phone this is environment-only and ``BOT_PROXY`` is
-    checked first - it is this project's own name, and it is what the README tells an operator
-    to set. A transparent VPN (Clash for Android in VPN mode) needs no entry at all: the
-    traffic is already redirected, and pointing this at a port that is not listening would
-    break a working setup.
     """
-    for name in ("BOT_PROXY", "TELEGRAM_PROXY",
-                 "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
+    for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy",
                  "ALL_PROXY", "all_proxy"):
         value = (os.getenv(name) or "").strip()
         if value:
-            # A bare host:port is accepted and treated as SOCKS5, which is what Clash offers.
-            # Writing 127.0.0.1:7897 in .env is the natural thing to do, and it used to be
-            # returned unchanged - a value with no scheme, which httpx rejects.
-            if "://" not in value:
-                return f"socks5://{value}"
             return value
 
     if os.name != "nt":
-        # Android and any other POSIX host stop here: there is no registry to consult.
         return ""
 
     try:
@@ -5968,32 +5764,16 @@ def gallery_url(text: str) -> str | None:
 def escape_html(text: str) -> str:
     """
     Escape the three characters Telegram's HTML parser treats as markup.
-
-    Quotes are not escaped: this is used for element content, and an escaped quote in a gallery title
-    would show as `&quot;` if the string ever reached a path that does not parse it. The one place a
-    quote matters - the href attribute - escapes its own value.
     """
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def build_gallery_info(gallery, telegraph_url: str = "", *, html: bool = False) -> str:
     """
-    The chat-side summary of a gallery: its tags by namespace, then title, source and rating.
+    Chat-side summary of a gallery, with every tag grouped by namespace.
 
-    Three presentation decisions worth knowing:
-
-    **Translated rather than bilingual.** A tag renders as `#獸耳`, not `#獸耳（animal ears）`. In a
-    line of ten tags the parenthetical doubles the length and makes the line hard to scan, and the
-    Roman form is only wanted when searching by it - which is what the source link below is for.
-
-    **Hashtag-shaped.** Every value gets a `#` and spaces become underscores, so a multi-word tag
-    stays one token. Translated tags rarely contain a space; the ones that do were never going to be
-    Chinese anyway.
-
-    **The title links to the Telegraph page when there is one**, so the page does not need a line of
-    its own. ``html`` must be true for that to be anything but literal text, and when it is, every
-    field here is escaped - a title holding "&" or "<" would otherwise make Telegram reject the whole
-    message.
+    The Telegraph page is the full presentation; this is what a chat can show, so
+    it keeps the facts and the grouped tags and omits the images.
     """
     def out(text: str) -> str:
         return escape_html(text) if html else text
@@ -6013,20 +5793,14 @@ def build_gallery_info(gallery, telegraph_url: str = "", *, html: bool = False) 
     if gallery.title:
         title = out(gallery.title)
         if html and telegraph_url:
-            # The href needs its quotes escaped too - a URL with a quote in it would end the
-            # attribute early.
             href = escape_html(telegraph_url).replace('"', "&quot;")
             lines.append(f'預覽: <a href="{href}">{title}</a>')
         else:
-            # **"名稱", not "預覽", when there is no page yet.**
-            #
-            # The first reply is a menu: nothing has been published, so there is nothing to preview
-            # and the title is not a link. Calling that line 預覽 promises a page that does not
-            # exist and reads as a link that failed to work.
+            # "名稱", not "預覽", when there is no page yet - the first reply is a menu, nothing has
+            # been published, and calling that line 預覽 promises a page that does not exist.
             lines.append(f"名稱: {title}")
 
-    # The URL the sender used rather than the normalised page_url, so an exhentai link stays an
-    # exhentai link - that is the address they can open with the cookies the bot already has.
+    # The URL the sender used rather than the normalised page_url, so an exhentai link stays one.
     source = gallery.url or gallery.page_url
     if source:
         lines.append("原始地址:")
@@ -6066,11 +5840,7 @@ async def handle_ehentai_gallery(message, url: str, user) -> bool:
             age = gallery_cache_age(url)
             logger.info("命中畫廊快取（%.0f 秒前）：%s", age or 0, url)
 
-        # **The facts go stale separately from the sweep.** Tags, title and rating change on e-hentai
-        # while the cached image URLs stay usable, and re-reading them costs one request against the
-        # sweep's fifty. So a cached gallery older than GALLERY_META_TTL_SECONDS has its metadata
-        # re-fetched and its image URLs kept - which is why this is a second lookup rather than a
-        # second store.
+        # The facts go stale separately from the sweep: one request against fifty.
         if (gallery is not None and age is not None
                 and age > GALLERY_META_TTL_SECONDS):
             logger.info("畫廊資料已過期（%.0f 小時），重新取得：%s", age / 3600, url)
@@ -6082,15 +5852,12 @@ async def handle_ehentai_gallery(message, url: str, user) -> bool:
                     timeout=float(EHENTAI_TIMEOUT_SECONDS),
                 )
             except ehentai.EhentaiError as exc:
-                # The cached copy is still usable, and refusing the parse because a refresh failed
-                # would be a worse outcome than showing the older tags.
                 logger.warning("重新取得畫廊資料失敗，沿用快取：%s（%s）", url, exc)
             else:
                 gallery = fresh
                 keep = (cached.get("display_urls"), cached.get("original_urls"))
                 await asyncio.to_thread(
-                    remember_gallery, url, gallery,
-                    keep if keep[0] else None)
+                    remember_gallery, url, gallery, keep if keep[0] else None)
 
         if gallery is None:
             gallery = await asyncio.to_thread(
@@ -6103,12 +5870,9 @@ async def handle_ehentai_gallery(message, url: str, user) -> bool:
 
         info = build_gallery_info(gallery)
         notes = []
-        # The functional notice stays: it explains why the Telegraph action is unavailable.
-        #
-        # The adult-content notice that used to follow it does not. "Telegraph 頁面可能被移除" is
-        # an opinion about someone else's moderation policy, and not an actionable one - the page
-        # either survives or it does not, and repeating it on every gallery is a sentence the reader
-        # has already read and cannot act on.
+        # The functional notice stays: it explains why the Telegraph action is unavailable. The
+        # adult-content notice that used to follow it does not - "Telegraph 頁面可能被移除" is an
+        # opinion about someone else's moderation policy, and not an actionable one.
         if gallery.is_adult and not TELEGRAPH_ALLOW_ADULT:
             notes.append("（成人畫廊，依設定不建立 Telegraph 頁面）")
 
@@ -6151,16 +5915,11 @@ def gallery_keyboard(gid: str, token: str) -> InlineKeyboardMarkup:
     the gallery id and token rather than any local path, so a button press is
     self-contained and cannot be used to reach an arbitrary file.
 
-    "Telegraph" publishes a page with the web-sized images embedded on it; nothing is
-    sent to the chat. "歸檔" downloads the gallery and sends it as ZIP archives, in
-    either resolution: the 1280 version is the site's own web-sized image (about
-    0.14 MB a page), the original is the full-resolution file (about 10 MB a page).
-
-    There is one Telegraph action, not two. The original-resolution page was removed
-    because it embedded the full-resolution files: about 2 GB for a two-hundred page
-    gallery, downloaded from e-hentai and - since the page images are now copied into
-    R2 - uploaded again, to show the same pictures the display page already shows. The
-    archive actions are the way to obtain the actual files.
+    "Telegraph" publishes a page with the images embedded on it; nothing is sent to
+    the chat. "歸檔" downloads the gallery and sends it as ZIP archives. The two
+    differ in resolution: the 1280 version is the site's own web-sized image
+    (about 0.14 MB a page), the original is the full-resolution file (about 10 MB a
+    page).
     """
     return InlineKeyboardMarkup([
         [
@@ -6249,7 +6008,7 @@ async def run_regenerate(query, user, entry: dict) -> None:
         )
         await asyncio.to_thread(remember_gallery, gallery.page_url, gallery,
                                 (display_urls, original_urls))
-        # The display URLs: there is only one Telegraph mode now, so there is nothing to choose.
+        # The display URLs: there is only one Telegraph mode now.
         embed = display_urls
         # Same conversion as publishing: the button embeds the same list, so without this
         # a regenerated page would be broken again on every page.
@@ -6257,12 +6016,8 @@ async def run_regenerate(query, user, entry: dict) -> None:
 
         # **And the same R2 host as publishing, which this path was missing.**
         #
-        # Without it the page was rebuilt with freshly swept hath.network links: they work, and
-        # they expire, so the page broke again hours later and the button only ever bought time.
-        # The first R2 change routed only the publishing path, and this is the other one.
-        #
-        # It costs nothing when the images are already uploaded - the key is a content hash, so
-        # host_on_r2 returns the recorded URLs without reading anything over the network.
+        # Without it the page was rebuilt with freshly swept hath.network links: they work and they
+        # expire, so the page broke again hours later and the button only ever bought time.
         embed = await host_on_r2(
             embed, gallery, mode, progress_status,
             user_id=user.id, stop_event=threading.Event())
@@ -6276,9 +6031,7 @@ async def run_regenerate(query, user, entry: dict) -> None:
         stored_page = entry.get("page")
         if stored_page is not None and getattr(stored_page, "access_token", ""):
             # No timeout argument: edit_telegraph_page defaults to the same 60 s that
-            # create_telegraph_page has always used here. Passing a constant I had invented -
-            # TELEGRAPH_TIMEOUT_SECONDS does not exist - compiled fine and would have raised
-            # NameError the first time anyone pressed the button.
+            # create_telegraph_page has always used here.
             page = await asyncio.to_thread(
                 ehentai.edit_telegraph_page,
                 stored_page,
@@ -6423,8 +6176,6 @@ def parse_gallery_callback(data: str) -> tuple[str, str, str] | None:
     if len(parts) != 4:
         return None
     mode, gid, token = parts[1], parts[2], parts[3]
-    # "orig" is deliberately absent: the mode was removed, so a stale button still carrying it is
-    # rejected here rather than reaching a dispatch branch that no longer exists.
     if mode not in {"view", "zip1280", "ziporig", "stop", "regen"}:
         return None
     if not gid.isdigit() or not token.isalnum():
@@ -7042,9 +6793,7 @@ async def run_gallery_images(message, status, gallery, mode: str,
     The **cover** is the exception - one image, fetched by URL by Telegram, which
     gives the reply a face instead of opening with plain text.
 
-    "顯示圖" embeds the site's web-sized image (about 0.14 MB a page). The original-resolution
-    page was removed; the archive actions are how the full-resolution files are obtained. The
-    earlier mention read: "原圖"
+    "顯示圖" embeds the site's web-sized image (about 0.14 MB a page) and "原圖"
     the full-resolution file (about 10 MB a page) — and that is a real difference
     here, because Telegraph fetches every embedded image itself.
 
@@ -7109,9 +6858,7 @@ async def run_gallery_images(message, status, gallery, mode: str,
     if reuse_page is None:
         # The sweep alone. The "歸檔" modes download through the same helper afterwards,
         # so a gallery already looked at costs no sweep there either.
-        # One flag for both slow phases of this parse. The sweep can take a minute and the R2
-        # upload two, and neither used to register anything - so the stop button, which is on screen
-        # for both, answered "目前沒有進行中的下載" and the work continued.
+        # One flag for both slow phases of this parse; neither used to register anything.
         parse_stop = threading.Event()
         display_urls, original_urls = await gallery_page_urls(
             gallery, status, False, stop_event=parse_stop)
@@ -7121,8 +6868,7 @@ async def run_gallery_images(message, status, gallery, mode: str,
             link_preview_options=source_link_options(),
         )
 
-        # The display URLs. The original-resolution page was removed; the sweep still returns both
-        # lists, so nothing has to be re-fetched if that changes.
+        # The display URLs. The original-resolution page was removed.
         embed = display_urls
         embed = await public_embed_urls(embed, gallery, status, report=True)
 
@@ -7182,28 +6928,22 @@ async def run_gallery_images(message, status, gallery, mode: str,
 
     telegraph_url = telegraph_page.url if telegraph_page is not None else ""
 
-    # The title links to the page, so the separate Telegraph line is gone. What it used to say -
-    # how many pages, whether the page was reused, whether its images had to be repaired - is worth
-    # keeping, so it moves to one short line rather than disappearing.
+    # The title links to the page, so the separate Telegraph line is gone; what it said is kept
+    # in one short line instead.
     summary_lines = [build_gallery_info(gallery, telegraph_url, html=True)]
     if telegraph_url:
         detail = ""
         if reuse_page is not None:
             detail = "先前已建立，圖片仍可載入"
         elif repaired:
-            # "網址不變" is not decoration: repairing exists so that a shared link keeps working, and
-            # a reader who cannot tell whether the address changed has no way to know the link they
-            # sent someone still resolves. A test asserts it, which is how this line was caught.
             detail = "已修復圖片"
             if damage is not None and damage.broken:
                 detail += f"（{len(damage.broken)} 張載入失敗）"
             detail += "，網址不變"
         pages = cached_entry.get("count") if reuse_page is not None else None
         count = pages or len(embed)
-        if detail:
-            summary_lines.append(f"（{detail}，內嵌 {count} 頁圖片）")
-        else:
-            summary_lines.append(f"（內嵌 {count} 頁圖片）")
+        summary_lines.append(f"（{detail}，內嵌 {count} 頁圖片）" if detail
+                             else f"（內嵌 {count} 頁圖片）")
     if telegraph_note:
         summary_lines.append(f"\n{escape_html(telegraph_note)}")
     summary = "\n".join(summary_lines)
@@ -7221,7 +6961,7 @@ async def run_gallery_images(message, status, gallery, mode: str,
                 if telegraph_url else None)
     if await edit_message_to_cover(status, gallery, summary, keyboard, parse_mode="HTML",
                                    cover_url=embed[0] if embed else ""):
-        if telegraph_page is not None:
+        if mode == "view" and telegraph_page is not None:
             from channel_publish import offer_eh_publish
             await offer_eh_publish(message, status, user.id, globals().get("EH_CHANNEL_PUBLISHER"))
         return
@@ -7231,10 +6971,6 @@ async def run_gallery_images(message, status, gallery, mode: str,
         link_preview_options=source_link_options(),
         reply_markup=keyboard,
     )
-
-    if telegraph_page is not None:
-        from channel_publish import offer_eh_publish
-        await offer_eh_publish(message, status, user.id, globals().get("EH_CHANNEL_PUBLISHER"))
 
 
 def download_gallery_direct(urls: list[str], output_dir: Path, *, referer: str,
@@ -7555,9 +7291,6 @@ async def gallery_page_urls(gallery, status, original: bool,
                     gallery.page_url)
         return display_urls, original_urls
 
-    # **Registered, or the stop button answers "目前沒有進行中的下載" and the sweep runs on.** This is
-    # the slowest phase of a Telegraph parse - one request per page - and it draws the button because
-    # run_with_progress is given a gid and token.
     chat_id = getattr(status, "chat_id", 0) or 0
     if stop_event is not None:
         register_running_stop(chat_id, stop_event)
@@ -7578,13 +7311,10 @@ async def gallery_page_urls(gallery, status, original: bool,
             total=pages or 0,
         )
     finally:
-        # Removed even when the sweep raised, so a stale flag cannot make a later stop claim to have
-        # stopped something it did not.
         if stop_event is not None:
             register_running_stop(chat_id, None)
 
-    # A stopped sweep returns a short list. Caching that would make the truncation permanent: the
-    # next press would read it back as "the gallery has N pages" and never ask again.
+    # A stopped sweep is not cached: a short list written back would make the truncation permanent.
     if stop_event is not None and stop_event.is_set():
         logger.info("圖片清單掃描已被使用者停止：%s", gallery.page_url)
         return display_urls, original_urls
@@ -8276,19 +8006,11 @@ def _download_archive_parallel(headers: dict, download_url: str, target: Path,
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(fetch_range, enumerate(ranges, 1)))
 
-    # **A stop is tested before the nothing-written test, and the order is the whole point.**
-    #
-    # Both conditions are true when a user presses stop early: no bytes have arrived yet, and
-    # the stop flag is set. Testing `written == 0` first made that case report
-    # "下載連結可能已過期，請重新取得" - a wrong diagnosis that sends the user off to re-request
-    # an archive that was never broken. Measured on the phone: stopped 0.09 s into a 114.3 MiB
-    # download, and the log blamed an expired link.
-    #
-    # The `written == 0` check still has to exist for the case it was written for: every range
-    # failing on its own, with no stop, means the URL really is dead, and returning a short read
-    # there would let the caller send a 0-byte archive.
-    if stopped() and written == 0:
-        return written
+    # Checked before the stop test on purpose. A genuine stop leaves a partial file,
+    # which the caller discards - but **nothing at all** written is not a partial
+    # download, it is a failed one, and reporting it as a short read would let the
+    # caller send a 0-byte archive. That is what happened when an expired archive URL
+    # made every range fail while a stop was arriving.
     if written == 0:
         raise ehentai.EhentaiError(
             "官方歸檔沒有任何分段下載成功（下載連結可能已過期，請重新取得）。")
@@ -8783,10 +8505,9 @@ async def gate_undirected_group_commands(update: Update,
 
     **Every failure inside the decision means "do not drop".** The call below is wrapped because
     ``Update.effective_message`` raises RuntimeError when the update has no Bot attached - a
-    library shortcut that a malformed or hand-built update can trip, as one did while this was
-    being tested. A gate that raises would take the whole update down and, worse, would do it
-    before the handlers it guards, so the bot would go quiet for a reason nothing in the log
-    explains. Answering something that need not have been answered is the recoverable failure.
+    library shortcut that a malformed or hand-built update can trip. A gate that raises would take
+    the whole update down and, worse, would do it before the handlers it guards, so the bot would
+    go quiet for a reason nothing in the log explains.
 
     **Why the drop is logged at DEBUG rather than INFO.** In a busy group a bare ``/start`` is
     not unusual, and one log line per occurrence would bury the entries that matter. It is still
@@ -9237,7 +8958,7 @@ def log_startup_configuration():
         if platform == "pixiv" and "refresh-token" in status:
             logger.warning(
                 "Pixiv 尚未設定 refresh-token，Pixiv 作品無法下載："
-                "執行 %s oauth:pixiv 取得後填入 .env。", find_executable()
+                "執行 .venv\\Scripts\\gallery-dl.exe oauth:pixiv 取得後填入 .env。"
             )
         else:
             logger.warning(
@@ -9331,56 +9052,6 @@ def telegram_server_root() -> str:
     ``Application.builder().base_url()`` - see ``telegram_base_url`` for why.
     """
     return TELEGRAM_API_BASE.rstrip("/")
-
-
-def telegram_base_is_local() -> bool:
-    """
-    Whether the Bot API endpoint is on this machine.
-
-    Needed because the self-hosted server listens on 127.0.0.1:8081 and **must not be reached
-    through the VPN**. python-telegram-bot's ``HTTPXRequest`` defaults to ``trust_env=True``,
-    which makes httpx read ``HTTP_PROXY``/``HTTPS_PROXY``/``ALL_PROXY`` from the environment -
-    and on a phone those are set in ``~/.bashrc`` so that gallery-dl can reach Twitter, Pixiv and
-    e-hentai.
-
-    Measured consequence: every Bot API call was being tunnelled out to the VPN and back to the
-    local port. ``/proc/net/tcp`` showed the socket to 127.0.0.1:8081 owned by the VPN's uid
-    rather than the bot's. It works, but it is pointless latency on every message, it doubles the
-    traffic, and it breaks outright on a VPN configured with a bypass for local addresses.
-
-    Only a loopback host counts. A remote self-hosted server is a normal case and should keep
-    whatever proxy the environment provides.
-    """
-    root = telegram_server_root()
-    if not root:
-        return False
-    try:
-        host = urlsplit(root).hostname or ""
-    except ValueError:
-        return False
-    return host in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}
-
-
-def bypass_proxy_for_loopback() -> None:
-    """
-    Add loopback to NO_PROXY so no child process tunnels local traffic.
-
-    httpx honours NO_PROXY, and so do requests and aiohttp - which is what gallery-dl uses. Doing
-    it in the environment as well as in the PTB request means one rule covers the bot's own HTTP
-    client, the Telegram calls, and every subprocess.
-
-    Existing entries are preserved: a user who set NO_PROXY deserves to keep it.
-    """
-    if not telegram_base_is_local():
-        return
-    wanted = ["127.0.0.1", "localhost", "::1"]
-    for name in ("NO_PROXY", "no_proxy"):
-        current = os.getenv(name) or ""
-        entries = [e.strip() for e in current.split(",") if e.strip()]
-        for host in wanted:
-            if host not in entries:
-                entries.append(host)
-        os.environ[name] = ",".join(entries)
 
 
 def telegram_base_url() -> str:
@@ -9578,25 +9249,6 @@ def build_application() -> Application:
         pool_timeout=30.0,
         media_write_timeout=request_timeout,
     )
-    # **With a local server, never let the environment proxy the Bot API calls.**
-    #
-    # HTTPXRequest builds its own httpx.AsyncClient and passes it `trust_env=True`, so httpx picks
-    # up HTTP_PROXY/HTTPS_PROXY/ALL_PROXY. On a phone those are set for gallery-dl's sake, which
-    # meant every getUpdates and every file upload was tunnelled out to the VPN and back to
-    # 127.0.0.1:8081 - measured by the socket to that port being owned by the VPN's uid instead of
-    # the bot's. It works, but it wastes a round trip through the tunnel on every message and
-    # breaks on a VPN that bypasses local addresses.
-    #
-    # `trust_env` is NOT a parameter of HTTPXRequest - passing it raised
-    #     TypeError: HTTPXRequest.__init__() got an unexpected keyword argument 'trust_env'
-    # and killed the bot at startup. The signature ends in `httpx_kwargs`, a dict forwarded to
-    # httpx.AsyncClient, which is where trust_env belongs.
-    #
-    # Only when the base URL is loopback: a *remote* self-hosted server is a normal case and must
-    # keep using the proxy.
-    if telegram_base_is_local():
-        request_kwargs["httpx_kwargs"] = {"trust_env": False}
-        logger.info("Bot API 位於本機，已停用其代理（不經 VPN 繞道）")
     builder = builder.get_updates_request(
         HTTPXRequest(**request_kwargs)
     ).request(
@@ -9664,8 +9316,6 @@ def wait_for_telegram(*, timeout_seconds: float = 900.0, interval: float = 5.0) 
 
 
 def main():
-    enable_thread_dumps()
-
     if len(sys.argv) > 1 and sys.argv[1] in {"--check", "--selfcheck"}:
         raise SystemExit(run_self_check())
 
@@ -9695,11 +9345,6 @@ def main():
 
     if not BOT_TOKEN:
         raise SystemExit("缺少 BOT_TOKEN，請複製 .env.example 為 .env 並填寫 Token。")
-
-    # Set NO_PROXY before anything can make a request or spawn a subprocess. With a self-hosted
-    # server this keeps localhost traffic off the VPN in the bot's own client, in PTB, and in
-    # gallery-dl - see bypass_proxy_for_loopback for what was measured.
-    bypass_proxy_for_loopback()
 
     # A replacement process waits for the previous instance to release the single-instance
     # lock, instead of sleeping for a fixed period.
@@ -9792,8 +9437,7 @@ def main():
     application.add_handler(
         CommandHandler("cache", admin_only(cache_command))
     )
-    # Operator-visible because "is anything I depend on known-broken" is a question that can be
-    # answered from a phone, and the answer changes without this repository changing.
+    # "Is anything I depend on known-broken" answerable from a phone.
     application.add_handler(
         CommandHandler("audit", admin_only(audit_command))
     )
@@ -9866,10 +9510,7 @@ def main():
         return
 
     log_startup_configuration()
-
-    # **Connect first, announce afterwards.** This line used to precede run_polling(), so a bot that
-    # died in get_me() had already logged 機器人已啟動 - which reads as a working bot ignoring
-    # messages. Nothing here is restarted by anything, so waiting is recoverable and exiting is not.
+    # Connect first, announce afterwards; see wait_for_telegram.
     ready = wait_for_telegram(
         timeout_seconds=float(env_text("STARTUP_WAIT_SECONDS", "900") or 900)
     )
