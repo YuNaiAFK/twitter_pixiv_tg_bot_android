@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.20** | [v1.20](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.20) | EH Telegraph 完成後獨立確認發布至 EH 頻道，與 Twitter 分開設定。 |
 | **1.19** | [v1.19](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.19) | e-hentai Telegraph 僅保留雙標題與圖片，完成訊息改用第一頁大圖封面。 |
 | **1.18** | [v1.18](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.18) | 新增 7z／RAR 圖片壓縮檔支援，私聊與群組入口同步辨識並串流解壓。 |
 | **1.17** | [v1.17](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.17) | 本機檔案製作 Telegraph 限 bot 管理員，非管理員靜默且不顯示製作指令；一般連結解析不變。 |

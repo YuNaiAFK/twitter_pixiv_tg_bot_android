@@ -7221,6 +7221,9 @@ async def run_gallery_images(message, status, gallery, mode: str,
                 if telegraph_url else None)
     if await edit_message_to_cover(status, gallery, summary, keyboard, parse_mode="HTML",
                                    cover_url=embed[0] if embed else ""):
+        if telegraph_page is not None:
+            from channel_publish import offer_eh_publish
+            await offer_eh_publish(message, status, user.id, globals().get("EH_CHANNEL_PUBLISHER"))
         return
 
     await status.edit_text(
@@ -7228,6 +7231,10 @@ async def run_gallery_images(message, status, gallery, mode: str,
         link_preview_options=source_link_options(),
         reply_markup=keyboard,
     )
+
+    if telegraph_page is not None:
+        from channel_publish import offer_eh_publish
+        await offer_eh_publish(message, status, user.id, globals().get("EH_CHANNEL_PUBLISHER"))
 
 
 def download_gallery_direct(urls: list[str], output_dir: Path, *, referer: str,
@@ -9178,7 +9185,8 @@ async def post_init(application: Application):
         BotCommand("status", "執行狀態"),
         BotCommand("cache", "解析快取狀態／清除"),
         BotCommand("restart", "重新啟動機器人"),
-        BotCommand("channels", "查詢或登記解析結果的目標頻道"),
+        BotCommand("channels", "查詢或登記 Twitter 目標頻道"),
+        BotCommand("ehchannels", "查詢或登記 e-hentai 目標頻道"),
     ]
 
     # **Scoped menus go to administrators only.** This used to include `AUTHORIZATION.allowed`
