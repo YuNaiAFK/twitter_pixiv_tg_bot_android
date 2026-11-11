@@ -1450,6 +1450,9 @@ def media_cache_payload(files: list[Path], url: str) -> dict:
             return {"files": []}
         return {"files": names, "filenames": [path.name for path in files],
                 "pixiv_filename_version": PIXIV_FILENAME_VERSION}
+    if detect_media_platform(url) == "twitter":
+        from twitter_spoilers import sensitive_media
+        return {"files": names, "twitter_sensitive": sensitive_media(files)}
     return {"files": names}
 
 
@@ -2202,7 +2205,7 @@ async def send_cached_media(message, status, url: str, payload: dict,
             # source link. Replaying a cached Pixiv link must not grow a link that the
             # original send did not have.
             attach_link=(platform != "pixiv"),
-            # Blur adult works. The rating is cached, so a replay costs nothing extra.
+            has_spoiler=(platform == "twitter" and payload.get("twitter_sensitive", True)),
         )
     except TelegramError as exc:
         logger.warning("從快取傳送失敗，將重新下載：%s", exc)
@@ -4912,6 +4915,9 @@ def build_gallery_dl_command(url: str, output_dir: Path, platform: str | None) -
     if config_path is not None:
         command.extend(["--config", str(config_path)])
 
+    if platform == "twitter":
+        command.append("--write-metadata")
+
     if platform == "pixiv":
         # 先用短檔名下載，避免長標題超過 Android 限制；中繼資料供送出前命名使用。
         command.extend(["--filename", PIXIV_DOWNLOAD_FILENAME, "--write-metadata"])
@@ -5467,7 +5473,7 @@ async def edit_message_to_cover(status, gallery, caption: str,
 async def send_single_media(message, file_path: Path, source_url: str,
                             temp_dir: Path, extra: str = "",
                             prefer_original: bool = False,
-                            keyboard=None, caption=None) -> bool:
+                            keyboard=None, caption=None, has_spoiler=False) -> bool:
     """
     Send one media file. Returns success.
 
@@ -5528,6 +5534,9 @@ async def send_single_media(message, file_path: Path, source_url: str,
                 raise TelegramError("GIF 文件傳送失敗，請查看日誌中的 MTProto 設定或連線資訊") from exc
             return True
         # 靜態圖片與影片沿用 Bot API 文件模式。
+        if has_spoiler:
+            await send_status(message, "此媒體無法以遮罩模式傳送，已略過，避免未遮罩內容曝光。")
+            return False
         with file_path.open("rb") as media:
             await message.reply_document(
                 document=media, filename=file_path.name, caption=text,
@@ -5538,6 +5547,7 @@ async def send_single_media(message, file_path: Path, source_url: str,
     if suffix in VIDEO_EXTENSIONS:
         with file_path.open("rb") as media:
             await message.reply_video(
+                has_spoiler=has_spoiler,
                 video=media,
                 filename=file_path.name,
                 caption=text,
@@ -5550,6 +5560,7 @@ async def send_single_media(message, file_path: Path, source_url: str,
     if suffix in ANIMATION_EXTENSIONS:
         with file_path.open("rb") as media:
             await message.reply_animation(
+                has_spoiler=has_spoiler,
                 animation=media,
                 filename=file_path.name,
                 caption=text,
@@ -5562,6 +5573,7 @@ async def send_single_media(message, file_path: Path, source_url: str,
         if size <= PHOTO_LIMIT_BYTES:
             with file_path.open("rb") as media:
                 await message.reply_photo(
+                    has_spoiler=has_spoiler,
                     photo=media, filename=file_path.name, caption=text,
                     reply_markup=keyboard, **caption_options,
                 )
@@ -5573,6 +5585,7 @@ async def send_single_media(message, file_path: Path, source_url: str,
             compress_note = "（原圖超過 10MB，已壓縮傳送）"
             with smaller.open("rb") as media:
                 await message.reply_photo(
+                    has_spoiler=has_spoiler,
                     photo=media,
                     filename=smaller.name,
                     # The link still leads when the image had to be shrunk, so the
@@ -5582,6 +5595,9 @@ async def send_single_media(message, file_path: Path, source_url: str,
                 )
             return True
 
+        if has_spoiler:
+            await send_status(message, "此媒體無法以遮罩模式傳送，已略過，避免未遮罩內容曝光。")
+            return False
         with file_path.open("rb") as media:
             await message.reply_document(
                 document=media, filename=file_path.name, caption=text,
@@ -5589,6 +5605,9 @@ async def send_single_media(message, file_path: Path, source_url: str,
             )
         return True
 
+    if has_spoiler:
+        await send_status(message, "此檔案類型不支援遮罩，已略過。")
+        return False
     with file_path.open("rb") as media:
         await message.reply_document(
             document=media, filename=file_path.name, caption=text,
@@ -5599,7 +5618,7 @@ async def send_single_media(message, file_path: Path, source_url: str,
 
 async def send_media_album(message, files: list[Path], source_url: str,
                            as_document: bool = False, keyboard=None,
-                           with_caption: bool = True) -> bool:
+                           with_caption: bool = True, has_spoiler=False) -> bool:
     """
     Send 2..ALBUM_LIMIT files as one album, with the source link as the **first**
     item's caption so it reads above the images. Raises TelegramError so the caller can
@@ -5652,6 +5671,8 @@ async def send_media_album(message, files: list[Path], source_url: str,
                 from twitter_captions import linked_caption
                 linked, entities = linked_caption(caption, source_url)
                 item_kwargs.update(caption=linked, caption_entities=entities, parse_mode=None)
+            if not as_document:
+                item_kwargs["has_spoiler"] = has_spoiler
             if as_document:
                 item_kwargs["disable_content_type_detection"] = True
                 # Send the real filename, so an original does not arrive as
@@ -5721,6 +5742,8 @@ def _strip_captions(media: list):
             # 移除說明重試時，仍保留文件模式與原始檔名。
             kwargs["disable_content_type_detection"] = item.disable_content_type_detection
             kwargs["api_kwargs"] = dict(item.api_kwargs) if item.api_kwargs else None
+        if hasattr(item, "has_spoiler"):
+            kwargs["has_spoiler"] = item.has_spoiler
         stripped.append(builder(**kwargs))
     return stripped
 
@@ -5805,7 +5828,7 @@ async def send_source_link(message, source_note: str, source_url: str = ""):
 async def send_original_files(message, files: list[Path], source_url: str,
                               temp_dir: Path,
                               as_document: bool = True,
-                              attach_link: bool = True
+                              attach_link: bool = True, has_spoiler: bool = False
                               ) -> tuple[int, str, list[Path]]:
     """
     Send downloaded files, optionally with the source link above them.
@@ -5881,7 +5904,7 @@ async def send_original_files(message, files: list[Path], source_url: str,
                     message, chunk, source_url, as_document=as_document,
                     keyboard=None,
                     # Later albums get no caption, so the link is not repeated.
-                    with_caption=not link_carried,
+                    with_caption=not link_carried, has_spoiler=has_spoiler,
                 )
                 sent += len(chunk)
                 link_carried = True
@@ -5906,7 +5929,7 @@ async def send_original_files(message, files: list[Path], source_url: str,
                     message, file_path, source_url, temp_dir,
                     prefer_original=as_document,
                     keyboard=None,
-                    caption=None if link_carried else caption,
+                    caption=None if link_carried else caption, has_spoiler=has_spoiler,
                 ):
                     sent += 1
                     link_carried = True
@@ -5930,7 +5953,7 @@ async def send_original_files(message, files: list[Path], source_url: str,
                 message, file_path, source_url, temp_dir,
                 prefer_original=as_document,
                 keyboard=None,
-                caption=None if link_carried else caption,
+                caption=None if link_carried else caption, has_spoiler=has_spoiler,
             ):
                 sent += 1
                 link_carried = True
@@ -9064,13 +9087,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.to_thread(remember_media_parse, media_url, media_files)
             return
 
+        from twitter_spoilers import sensitive_media
+        twitter_sensitive = sensitive_media(media_files)
+
         # --- X/Twitter: the same sender, but as normal photos. A Telegram photo
         # is re-encoded, which is what users expect from a post preview; the
         # byte-exact "original" path is reserved for Pixiv artwork. ---
         sent_count, album_note, _too_large = await send_original_files(
             message, media_files, media_url, temp_dir, as_document=False,
             # Requested: X/Twitter shows the source link, Pixiv does not.
-            attach_link=True,
+            attach_link=True, has_spoiler=twitter_sensitive,
         )
 
         summary = f"X/Twitter 解析完成，已傳送 {sent_count}/{len(media_files)} 個檔案。"

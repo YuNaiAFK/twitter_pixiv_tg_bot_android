@@ -198,3 +198,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - EH 訊息來自綁定頻道（含討論群自動轉貼）或 @exviewer_bot 時，靜默略過。
 - 比對 Telegram 的原始來源、發送者及 inline bot；不以訊息文字猜測來源。
 - 在授權提示、冷卻及解析之前攔截，不產生回覆。
+
+# v1.24
+
+- Twitter 敏感貼文的圖片、影片及 GIF 使用 Telegram 遮罩。
+- 分級隨快取保存，相簿與降級重試保留遮罩；未知分級與舊快取也加遮罩。
+- 無法以遮罩發送時提示略過，不降級成未遮罩文件；Pixiv 文件模式不變。
