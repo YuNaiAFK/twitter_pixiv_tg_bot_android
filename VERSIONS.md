@@ -175,3 +175,9 @@ newest release after any rebuild, and check `/releases/latest` rather than assum
 
 `AndroidManifest.xml` deliberately carries **no** `versionCode` or `versionName`, so there is
 exactly one place the number lives and no way for the manifest and the file to disagree.
+
+# v1.23
+
+- EH 解析優先掃描已設定的 EH 頻道，相同連結直接無來源複製既有結果。
+- 共用發布查重的增量索引；未命中或讀取失敗仍走 exviewer／正常解析。
+- 保留官方壓縮包、取消按鈕與僅限管理員私聊的頻道發布選項。
