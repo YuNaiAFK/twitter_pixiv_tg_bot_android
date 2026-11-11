@@ -35,6 +35,7 @@ APK whose `versionCode` is not greater than the installed one, so it is what mak
 
 | version | release | what changed |
 | --- | --- | --- |
+| **1.22.4** | [v1.22.4](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.22.4) | exviewer 結果新增取消，只隱藏按鈕、不改訊息。 |
 | **1.22.3** | [v1.22.3](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.22.3) | exviewer 結果提供官方壓縮包下載，頻道發布規則不變。 |
 | **1.22.2** | [v1.22.2](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.22.2) | 已授權群組可取用 exviewer，頻道發布仍僅限管理員私聊。 |
 | **1.22.1** | [v1.22.1](https://github.com/YuNaiAFK/twitter_pixiv_tg_bot_android/releases/tag/v1.22.1) | 頻道去重改用持久化增量索引，避免每次重讀歷史。 |
