@@ -192,3 +192,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - EH 一般選單五分鐘未操作，自動刪除 bot 選單訊息。
 - 從頻道或 exviewer 取得的解析，五分鐘未操作只隱藏按鈕並保留內容。
 - 授權使用者按過按鈕即取消計時；不影響原始連結與進行中的停止／R2 重試按鈕。
+
+# v1.23.3
+
+- EH 訊息來自綁定頻道（含討論群自動轉貼）或 @exviewer_bot 時，靜默略過。
+- 比對 Telegram 的原始來源、發送者及 inline bot；不以訊息文字猜測來源。
+- 在授權提示、冷卻及解析之前攔截，不產生回覆。
