@@ -240,3 +240,8 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 三份已確認廣告共 18 個圖片特徵；真實畫廊 3650545 驗證保留 26 頁、排除第 27～33 頁。
 - 圖片檢查失敗、無可靠候選或刪除比例異常時，R2 上傳前停止，避免再次發布未確認結果。
 - Windows 與 Termux 使用 Tesseract；中英文官方模型及授權隨專案附上，Termux 安裝腳本加入相應依賴。
+
+# v1.26.1
+
+- 外部廣告辨識僅檢查末段最多 10 張圖片；第 1～3 張一律不取圖、不辨識、不排除。
+- 無外部廣告標籤、或作品只有三張以下時，不進行廣告圖片檢查。
