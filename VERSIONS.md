@@ -204,3 +204,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - Twitter 敏感貼文的圖片、影片及 GIF 使用 Telegram 遮罩。
 - 分級隨快取保存，相簿與降級重試保留遮罩；未知分級與舊快取也加遮罩。
 - 無法以遮罩發送時提示略過，不降級成未遮罩文件；Pixiv 文件模式不變。
+
+# v1.24.1
+
+- 單檔解析直接修改第一則進度訊息成媒體／文件，包含 Pixiv GIF 及快取結果。
+- 多檔保留相簿及原有文件形式，成功後移除進度訊息，不再另發完成通知。
+- 保留遮罩、原檔名、MTProto 文件快取及頻道發布；部分失敗仍保留必要提示。
