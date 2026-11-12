@@ -267,3 +267,10 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - 修復來源回傳 HTTP 200、內容卻是 Invalid request／HTML 時，被當作圖片解碼的失敗。
 - 廣告辨識前檢查圖片格式；非圖片回應走既有的一次性網址刷新，仍失敗則停止。
+
+# v1.27
+
+- EH 多頻道查詢合併為一次 MTProto 連線，保留原有增量索引與匹配順序。
+- R2 與廣告辨識下載重用 HTTP 連線。
+- 廣告辨識保留的原始圖片暫存供 R2 上傳及重試，不重複下載，任務結束清理。
+- 保留圖片有效性檢查、去廣告、去重、額度與停止機制，並新增頻道耗時／下載重用日誌。
