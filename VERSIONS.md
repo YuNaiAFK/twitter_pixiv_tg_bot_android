@@ -256,3 +256,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - 修復 exviewer 的 Telegraph 圖片使用 /file/... 相對網址時，被誤判為沒有圖片的問題。
 - 支援根目錄相對、路徑相對及協定相對的圖片來源；仍檢查圖片有效性並排除不安全格式。
+
+# v1.26.4
+
+- 加入畫廊 3391383 最後兩張（第 7、8 張）的已確認廣告圖片特徵。
+- 以末段實際圖片特徵驗證只排除這兩張，保留前六張；前三張不取圖。
+- 更新去廣告快取版本，仍只對有外部廣告標籤的畫廊啟用。
