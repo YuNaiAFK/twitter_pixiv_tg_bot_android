@@ -227,3 +227,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 2051305/d1969d0ee2：第 36～41 頁；2000612/54a53baa2d：第 38～42 頁。
 - 先過濾再上傳 R2；略過這兩份的頻道及 exviewer 結果，舊頁快取於下次製作更新。
 - 僅限已確認畫廊，不是泛用圖片廣告辨識；官方壓縮包內容不變。
+
+# v1.25.1
+
+- 僅有 other:extraneous ads（外部廣告）標籤時才啟用已確認頁面排除。
+- 無標籤時不過濾圖片，也不因廣告規則略過頻道／exviewer 既有結果。
+- 過濾狀態隨快取記錄，標籤移除後下次製作會恢復完整頁面。
