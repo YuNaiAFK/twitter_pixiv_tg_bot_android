@@ -251,3 +251,8 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 修復廣告檢查讀取已過期圖片網址時的 HTTP 403 失敗。
 - 來源回傳 401／403／404／410 時，強制刷新圖片清單並再檢查一次；仍失敗就停止，不上傳、不建頁。
 - 維持只檢查末十張、前三張保留及外部廣告標籤門檻。
+
+# v1.26.3
+
+- 修復 exviewer 的 Telegraph 圖片使用 /file/... 相對網址時，被誤判為沒有圖片的問題。
+- 支援根目錄相對、路徑相對及協定相對的圖片來源；仍檢查圖片有效性並排除不安全格式。
