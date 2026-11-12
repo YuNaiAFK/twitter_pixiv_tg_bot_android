@@ -210,3 +210,8 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 單檔解析直接修改第一則進度訊息成媒體／文件，包含 Pixiv GIF 及快取結果。
 - 多檔保留相簿及原有文件形式，成功後移除進度訊息，不再另發完成通知。
 - 保留遮罩、原檔名、MTProto 文件快取及頻道發布；部分失敗仍保留必要提示。
+
+# v1.24.2
+
+- 修復單檔編輯原訊息時的 `media not found`：正確設定 multipart 附件參照。
+- 新增圖片、影片、動畫與文件的實際請求序列化檢查。
