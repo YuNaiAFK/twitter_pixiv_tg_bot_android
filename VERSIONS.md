@@ -262,3 +262,8 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 加入畫廊 3391383 最後兩張（第 7、8 張）的已確認廣告圖片特徵。
 - 以末段實際圖片特徵驗證只排除這兩張，保留前六張；前三張不取圖。
 - 更新去廣告快取版本，仍只對有外部廣告標籤的畫廊啟用。
+
+# v1.26.5
+
+- 修復來源回傳 HTTP 200、內容卻是 Invalid request／HTML 時，被當作圖片解碼的失敗。
+- 廣告辨識前檢查圖片格式；非圖片回應走既有的一次性網址刷新，仍失敗則停止。
