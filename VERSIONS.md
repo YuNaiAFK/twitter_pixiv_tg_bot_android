@@ -233,3 +233,10 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 僅有 other:extraneous ads（外部廣告）標籤時才啟用已確認頁面排除。
 - 無標籤時不過濾圖片，也不因廣告規則略過頻道／exviewer 既有結果。
 - 過濾狀態隨快取記錄，標籤移除後下次製作會恢復完整頁面。
+
+# v1.26
+
+- 重寫 EH 去廣告：僅含外部廣告標籤時，以已確認圖片樣本及本機 OCR 判斷，不再按畫廊 ID／固定頁碼刪除。
+- 三份已確認廣告共 18 個圖片特徵；真實畫廊 3650545 驗證保留 26 頁、排除第 27～33 頁。
+- 圖片檢查失敗、無可靠候選或刪除比例異常時，R2 上傳前停止，避免再次發布未確認結果。
+- Windows 與 Termux 使用 Tesseract；中英文官方模型及授權隨專案附上，Termux 安裝腳本加入相應依賴。

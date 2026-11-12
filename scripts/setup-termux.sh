@@ -79,14 +79,14 @@ is_root() { [ "$(id -u)" = "0" ]; }
 
 say "Termux packages"
 if [ "$CHECK_ONLY" = "1" ]; then
-    for p in python clang libjpeg-turbo libpng freetype libarchive proot-distro; do
+    for p in python clang libjpeg-turbo libpng freetype libarchive tesseract libc++ libwebp proot-distro; do
         if dpkg -s "$p" >/dev/null 2>&1; then ok "$p installed"; else skip "$p missing"; fi
     done
 else
     run pkg update -y || warn "pkg update reported a problem; continuing"
     # The image libraries are Pillow's build dependencies: without them pip tries to compile
     # from source and fails on the missing headers rather than installing a wheel.
-    run pkg install -y python clang make libjpeg-turbo libpng freetype libarchive proot-distro git
+    run pkg install -y python clang make libjpeg-turbo libpng freetype libarchive tesseract libc++ libwebp proot-distro git
     ok "packages installed"
 fi
 

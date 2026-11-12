@@ -195,7 +195,7 @@ fi
 info "installing python, git and the Pillow build dependencies"
 # shellcheck disable=SC2086
 if ! apt-get install -y $APT_OPTS </dev/null \
-        python git clang make libjpeg-turbo libpng freetype openssl libffi libarchive proot-distro \
+        python git clang make libjpeg-turbo libpng freetype openssl libffi libarchive tesseract libc++ libwebp proot-distro \
         2>&1 | tail -n 20; then
     warn "apt-get install reported a problem"
 fi
