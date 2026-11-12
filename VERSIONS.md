@@ -220,3 +220,10 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - 沿用 exviewer 前檢查 Telegraph 頁面及全部內嵌圖片。
 - 頁面失效、無圖片、壞圖、逾時或檢查失敗時，改走原本 EH 解析，不傳送失效預覽。
+
+# v1.25
+
+- Telegraph 製作及重新生成排除兩份已確認畫廊的廣告頁。
+- 2051305/d1969d0ee2：第 36～41 頁；2000612/54a53baa2d：第 38～42 頁。
+- 先過濾再上傳 R2；略過這兩份的頻道及 exviewer 結果，舊頁快取於下次製作更新。
+- 僅限已確認畫廊，不是泛用圖片廣告辨識；官方壓縮包內容不變。
