@@ -215,3 +215,8 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - 修復單檔編輯原訊息時的 `media not found`：正確設定 multipart 附件參照。
 - 新增圖片、影片、動畫與文件的實際請求序列化檢查。
+
+# v1.24.3
+
+- 沿用 exviewer 前檢查 Telegraph 頁面及全部內嵌圖片。
+- 頁面失效、無圖片、壞圖、逾時或檢查失敗時，改走原本 EH 解析，不傳送失效預覽。
