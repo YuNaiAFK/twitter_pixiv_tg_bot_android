@@ -312,3 +312,8 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - exviewer 圖片檢查遇到暫時連線錯誤時，只重試失敗圖片，並將並行數降為 4、2；保留所有圖片完整驗證。
 - 永久失效或三輪檢查仍失敗才退回本機解析；群組與私聊共用修正。
+
+# v1.27.7
+
+- EH 封面網址被 Telegram 拒絕時，下載實際第一張圖並轉成相容 JPEG 直接上傳，仍修改原訊息並保留說明與按鈕。
+- 僅調整訊息封面，不改動 R2 或 Telegraph 原圖；支援 Termux 缺少 Pillow WebP 的系統解碼備援。
