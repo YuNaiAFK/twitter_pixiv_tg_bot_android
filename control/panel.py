@@ -703,6 +703,28 @@ def b2_usage() -> dict:
     return result
 
 
+def phone_image_usage() -> dict:
+    try:
+        from dotenv import dotenv_values
+        if not (os.getenv("PHONE_IMAGE_PUBLIC_BASE") or
+                dotenv_values(PROJECT / ".env").get("PHONE_IMAGE_PUBLIC_BASE")):
+            return {"state": "unconfigured"}
+        if str(PROJECT / "bot") not in sys.path:
+            sys.path.insert(0, str(PROJECT / "bot"))
+        from phone_images import DISK_RESERVE, MAX_STORAGE
+        from r2 import format_bytes
+        root = PROJECT / "data" / "public-images"
+        sizes = [p.stat().st_size for p in root.iterdir()
+                 if not p.name.startswith(".") and not p.is_symlink() and p.is_file()]
+        used = sum(sizes)
+        remaining = max(0, min(MAX_STORAGE - used, shutil.disk_usage(root).free - DISK_RESERVE))
+        return {"state": "ok", "used_h": format_bytes(used), "free_h": format_bytes(MAX_STORAGE),
+                "remaining_h": format_bytes(remaining), "objects": len(sizes),
+                "percent": 100 * used / MAX_STORAGE, "full": remaining == 0}
+    except Exception:
+        return {"state": "error", "reason": "無法讀取手機圖床目錄或磁碟用量"}
+
+
 def build_status(api_port: int) -> dict:
     bot_up, bot_pid, bot_how = bot_running()
     srv_up, srv_pid, srv_how = server_running(api_port)
@@ -722,6 +744,7 @@ def build_status(api_port: int) -> dict:
         "cache_h": human(cache_bytes),
         # How full the image host is. Cached for R2_USAGE_TTL, because the app polls this endpoint
         # and a bucket listing per poll would be a round trip to Cloudflare every few seconds.
+        "phone_image": phone_image_usage(),
         "r2": r2_usage(),
         "b2": b2_usage(),
         "log": {

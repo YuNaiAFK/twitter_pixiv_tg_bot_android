@@ -111,10 +111,12 @@ public class MainActivity extends Activity {
         value.setText(storage.optString("used_h") + " / " + storage.optString("free_h"));
         value.setTextColor(Color.parseColor(full ? "#e5534b" : percent >= 80 ? "#e8b23a" : "#35c07a"));
         detail.setText("可再上傳 " + storage.optString("remaining_h") + "（"
-                + storage.optLong("objects") + " 個物件，" + Math.round(percent) + "%）");
+                + storage.optLong("objects") + " 個物件，" + Math.round(percent) + "%）"
+                + (storage.has("limit_h") && !storage.optString("limit_h").equals(storage.optString("free_h"))
+                   ? " · 切換門檻 " + storage.optString("limit_h") : ""));
     }
 
-    private TextView r2Value, r2Detail, b2Value, b2Detail;
+    private TextView phoneValue, phoneDetail, r2Value, r2Detail, b2Value, b2Detail;
     private TextView logView, logMeta, bannerText, bannerTitle, bannerDetail, versionLabel;
     private View banner;
     private Button liveButton, bannerButton;
@@ -412,7 +414,13 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams full =
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
         full.setMargins(dp(3), dp(3), dp(3), dp(3));
-        LinearLayout r2Card = card(v, d, "R2 圖床", "#e6e9ef");
+        LinearLayout phoneRow = new LinearLayout(this);
+        LinearLayout phoneCard = card(v, d, "手機圖床・優先", "#e6e9ef");
+        phoneValue = v[0]; phoneDetail = d[0];
+        phoneCard.setLayoutParams(new LinearLayout.LayoutParams(full));
+        phoneRow.addView(phoneCard);
+        root.addView(phoneRow);
+        LinearLayout r2Card = card(v, d, "R2 備援", "#e6e9ef");
         r2Value = v[0]; r2Detail = d[0];
         r2Card.setLayoutParams(full);
         thirdRow.addView(r2Card);
@@ -854,7 +862,8 @@ public class MainActivity extends Activity {
                     diskValue.setTextColor(Color.parseColor("#e6e9ef"));
                     diskDetail.setText("快取 " + cache);
 
-                    renderStorage(r2Value, r2Detail, r2, "圖片會使用會過期的原始網址");
+                    renderStorage(phoneValue, phoneDetail, s.optJSONObject("phone_image"), "未啟用手機圖床");
+                    renderStorage(r2Value, r2Detail, r2, "未設定 R2 備援");
                     renderStorage(b2Value, b2Detail, b2, "未啟用 B2 備援");
                 });
             } catch (Exception exc) {
@@ -868,6 +877,8 @@ public class MainActivity extends Activity {
                     srvValue.setText("—");
                     pxyValue.setText("—");
                     diskValue.setText("—");
+                    phoneValue.setText("—");
+                    phoneDetail.setText("—");
                     r2Value.setText("—");
                     r2Detail.setText("—");
                     b2Value.setText("—");

@@ -150,7 +150,13 @@
     <div class="detail" id="disk-detail">—</div>
   </div>
   <div class="card">
-    <div class="label">R2 圖床</div>
+    <div class="label">手機圖床・優先</div>
+    <div class="value"><span class="dot" id="phone-dot"></span><span id="phone-text">—</span></div>
+    <div class="detail" id="phone-detail">—</div>
+    <div class="bar" id="phone-bar-wrap" style="display:none"><div class="bar-fill" id="phone-bar"></div></div>
+  </div>
+  <div class="card">
+    <div class="label">R2 備援</div>
     <div class="value"><span class="dot" id="r2-dot"></span><span id="r2-text">—</span></div>
     <div class="detail" id="r2-detail">—</div>
     <!-- A bar rather than only a number: the useful thing about a storage quota is how close it is,
@@ -300,7 +306,8 @@ async function refreshStatus() {
     $("disk-text").textContent = s.disk.free_h ? s.disk.free_h + " 可用" : "—";
     $("disk-detail").textContent = "快取 " + (s.cache_h || "—");
 
-    renderStorage("r2", s.r2, "圖片會使用會過期的原始網址");
+    renderStorage("phone", s.phone_image, "未啟用手機圖床");
+    renderStorage("r2", s.r2, "未設定 R2 備援");
     renderStorage("b2", s.b2, "未啟用 B2 備援");
     $("clock").textContent = new Date(s.time * 1000).toLocaleTimeString("zh-TW", { hour12: false });
   } catch (e) {
@@ -333,7 +340,8 @@ function renderStorage(id, r2, disabled) {
 
   setStatus(id, level,
             `${r2.used_h} / ${r2.free_h}`,
-            `剩餘 ${r2.remaining_h}（${r2.objects} 個物件，${percent}%）`);
+            `剩餘 ${r2.remaining_h}（${r2.objects} 個物件，${percent}%）` +
+            (r2.limit_h && r2.limit_h !== r2.free_h ? ` · 切換門檻 ${r2.limit_h}` : ""));
 
   wrap.style.display = "";
   bar.style.width = Math.min(100, percent) + "%";
