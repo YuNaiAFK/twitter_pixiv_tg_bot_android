@@ -6874,19 +6874,43 @@ async def host_on_r2(embed: list, gallery, mode: str, status, *, user_id: int | 
     ``run_coroutine_threadsafe``, throttled to one edit every few seconds. A gallery is about two
     hundred images and takes minutes; a status line that never changes for minutes looks stuck.
     """
+    import phone_images
+
     settings = r2.r2_settings()
-    if settings is None or not embed:
+    if not embed:
         return embed
 
     fallback = r2.b2_settings()
     read_usage = r2.storage_usage if fallback is not None else r2.bucket_usage
     from eh_ad_rules import has_external_ads
     cached = [] if has_external_ads(gallery) else cached_r2_urls(gallery.page_url, gallery, mode)
+    phone_base = phone_images.public_base()
     public_prefix = tuple(item.public_base.rstrip("/") + "/" for item in (settings, fallback) if item is not None)
+    if phone_base:
+        public_prefix += (phone_base + "/",)
     if (cached and len(cached) == len(embed)
             and all(isinstance(url, str) and url.startswith(public_prefix) for url in cached)):
         logger.info("沿用已上傳到 R2 的 %d 張圖片", len(cached))
         return cached
+
+    phone_urls = {}
+    if phone_base:
+        def fetch_for_phone(url):
+            if download_cache is not None and url in download_cache:
+                return download_cache[url][0].read_bytes()
+            return r2.fetch_image(url, timeout=float(R2_UPLOAD_TIMEOUT), referer="https://e-hentai.org/")[0]
+
+        await status.edit_text("正在將圖片存入手機圖床……")
+        phone_urls = await asyncio.to_thread(phone_images.store_many, embed, fetch=fetch_for_phone,
+                                             stop_event=stop_event)
+        if stop_event is not None and stop_event.is_set():
+            raise R2UploadStopped("使用者停止了解析")
+        if len(phone_urls) == len(embed):
+            urls = [phone_urls[i] for i in range(len(embed))]
+            remember_r2_urls(gallery.page_url, gallery, mode, urls)
+            return urls
+    if settings is None:
+        return [phone_urls.get(i, url) for i, url in enumerate(embed)]
 
     async def ask_or_stop(failed_count: int, reason: str) -> None:
         if user_id is None:
@@ -6949,12 +6973,12 @@ async def host_on_r2(embed: list, gallery, mode: str, status, *, user_id: int | 
         await status.edit_text(
             "⚠️ R2 免費額度已滿，這次不改用 R2（已通知管理員）。",
             link_preview_options=source_link_options())
-        return embed
+        return [phone_urls.get(i, url) for i, url in enumerate(embed)]
 
     embed = list(embed)
     refreshed_source = False
-    output_urls = list(embed)
-    pending_indices = list(range(len(embed)))
+    output_urls = [phone_urls.get(i, url) for i, url in enumerate(embed)]
+    pending_indices = [i for i in range(len(embed)) if i not in phone_urls]
     failure_round = 0
     committed_bytes = used_bytes
     quota_blocked = 0

@@ -1,6 +1,6 @@
 # X／Twitter、Pixiv 與 e-hentai Telegram 機器人（Android）
 
-傳送作品連結即可取得圖片與影片；也可將本機圖片或壓縮檔整理成 R2 圖片與 Telegraph 頁面。
+傳送作品連結即可取得圖片與影片；也可將本機圖片或壓縮檔整理成 Telegraph 頁面。
 
 **Windows 為主專案，Android 為移植版本。** 兩者各自部署，共用功能同步維護。
 
@@ -213,3 +213,9 @@ R2 達 `R2_LIMIT_PERCENT`（預設 95%，以 10 GB 額度計即 9.5 GB）時，E
 本專案未宣告整體程式碼授權條款。標籤翻譯資料為衍生作品，適用 **CC BY-NC-SA 3.0**；再利用時請一併確認上游與各相依專案的授權。
 
 [完整授權說明](docs/maintenance.md#授權) · [致謝](docs/maintenance.md#致謝)
+
+## 手機圖床
+
+在 Android 專案的 `.env` 設定 `PHONE_IMAGE_PUBLIC_BASE`，新製作的 EH 與本機檔案 Telegraph 頁面會優先把圖片存到手機。手機圖床容量上限為 60 GB（十進位），另保留至少 2 GB 裝置空間。放不進手機或公開圖床未就緒時，尚未存好的圖片接續使用原有的 R2／B2 流程。已發布的 R2 圖片與網址不會搬移或重寫。
+
+Cloudflare Tunnel 的公開主機名稱請指向同一支手機的 `http://127.0.0.1:8092`。將隧道 token 儲存在 Termux 私有路徑 `~/.phone-image-host.token`（權限 600），不要寫進 Git。確認手動運作後，可把 `control/boot-image-host.sh` 安裝到 Termux:Boot 的 `~/.termux/boot/20-image-host.sh`。Windows 版本維持原有的儲存設定。

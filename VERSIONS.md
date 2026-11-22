@@ -361,3 +361,7 @@ exactly one place the number lives and no way for the manifest and the file to d
 - EH 上傳遇到來源連線失敗、網址失效或非圖片內容時，重新取得一次圖片清單，只補傳失敗的來源圖片。
 - 保留已上傳圖片與去廣告後的頁序；錯誤回應不會寫入圖床。R2／B2 的容量門檻不變。
 
+# v1.28.0
+
+- Android 支援 60 GB 手機圖床，供新製作的 EH 與本機檔案 Telegraph 頁面優先使用；備援仍依序使用 R2、B2。
+

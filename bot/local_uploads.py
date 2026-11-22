@@ -546,17 +546,30 @@ def register(application, runtime):
                     batches.pop(key, None)
                     cleanup_batch(batch)
                     return
+                import phone_images
                 import r2
                 settings = r2.r2_settings()
-                if settings is None:
+                phone_base = phone_images.public_base()
+                if settings is None and not phone_base:
                     raise ValueError("尚未設定 R2，無法製作本機檔案預覽")
                 fallback = r2.b2_settings()
                 read_usage = r2.storage_usage if fallback is not None else r2.bucket_usage
                 allowance = r2.limit_bytes()
                 entries = await asyncio.to_thread(prepare_inputs, batch.records, batch.root / "prepared")
                 batch.cover = entries[0][1]
+                urls = [None] * len(entries)
+                pending = list(range(len(entries)))
+                if phone_base:
+                    await status.edit_text("正在將圖片存入手機圖床……")
+                    local_urls = await asyncio.to_thread(phone_images.store_many, pending,
+                        fetch=lambda i: entries[i][1].read_bytes(), stop_event=batch.stop)
+                    for i, url in local_urls.items():
+                        urls[i] = url
+                    pending = [i for i in pending if i not in local_urls]
+                if pending and settings is None:
+                    raise ValueError("手機圖床未完成儲存，且未設定 R2 備援")
                 lookup_failures = 0
-                while True:
+                while pending:
                     if batch.stop.is_set():
                         raise ValueError("已停止製作")
                     try:
@@ -573,13 +586,11 @@ def register(application, runtime):
                             lookup_failures = 0
                         else:
                             await asyncio.sleep(2 ** lookup_failures)
-                if used >= allowance and fallback is not None:
+                if pending and used >= allowance and fallback is not None:
                     settings = fallback
                     allowance = r2.B2_LIMIT_BYTES
                     used, _ = await asyncio.to_thread(read_usage, settings)
                     await status.edit_text("R2 已達切換門檻，本次改用 Backblaze B2。")
-                urls = [None] * len(entries)
-                pending = list(range(len(entries)))
                 failures = 0
                 while pending:
                     if batch.stop.is_set():
