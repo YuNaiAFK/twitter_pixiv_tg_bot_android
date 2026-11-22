@@ -159,6 +159,12 @@
       <div class="bar-fill" id="r2-bar"></div>
     </div>
   </div>
+  <div class="card">
+    <div class="label">Backblaze B2 備援</div>
+    <div class="value"><span class="dot" id="b2-dot"></span><span id="b2-text">—</span></div>
+    <div class="detail" id="b2-detail">—</div>
+    <div class="bar" id="b2-bar-wrap" style="display:none"><div class="bar-fill" id="b2-bar"></div></div>
+  </div>
 </div>
 
 <h2>機器人</h2>
@@ -294,28 +300,29 @@ async function refreshStatus() {
     $("disk-text").textContent = s.disk.free_h ? s.disk.free_h + " 可用" : "—";
     $("disk-detail").textContent = "快取 " + (s.cache_h || "—");
 
-    renderR2(s.r2);
+    renderStorage("r2", s.r2, "圖片會使用會過期的原始網址");
+    renderStorage("b2", s.b2, "未啟用 B2 備援");
     $("clock").textContent = new Date(s.time * 1000).toLocaleTimeString("zh-TW", { hour12: false });
   } catch (e) {
     setStatus("bot", "off", "無法連線", String(e));
   }
 }
 
-function renderR2(r2) {
+function renderStorage(id, r2, disabled) {
   // Every branch sets all four elements, so a value left over from a previous poll can never sit
   // under a dot that says something else.
-  const bar = $("r2-bar");
-  const wrap = $("r2-bar-wrap");
+  const bar = $(id + "-bar");
+  const wrap = $(id + "-bar-wrap");
 
   if (!r2 || r2.state === "unconfigured") {
-    setStatus("r2", "off", "未設定", "圖片會使用會過期的原始網址");
+    setStatus(id, "off", "未設定", disabled);
     wrap.style.display = "none";
     return;
   }
   if (r2.state !== "ok") {
     // Not a zero. Saying "0 GB" when the bucket could not be read is the kind of wrong answer
     // someone acts on, which is worse than saying nothing.
-    setStatus("r2", "warn", "讀取失敗", r2.reason || "無法取得用量");
+    setStatus(id, "warn", "讀取失敗", r2.reason || "無法取得用量");
     wrap.style.display = "none";
     return;
   }
@@ -324,7 +331,7 @@ function renderR2(r2) {
   const level = r2.full ? "full" : (percent >= 80 ? "warn" : "on");
   const label = r2.full ? "已滿" : percent >= 80 ? "接近上限" : "正常";
 
-  setStatus("r2", level,
+  setStatus(id, level,
             `${r2.used_h} / ${r2.free_h}`,
             `剩餘 ${r2.remaining_h}（${r2.objects} 個物件，${percent}%）`);
 

@@ -348,3 +348,10 @@ exactly one place the number lives and no way for the manifest and the file to d
 - EH 解析按鈕允許原發起者或 bot 管理員操作；其他成員仍會被拒絕。
 - 管理員停止或重新生成時，操作的是原發起者的任務，群組解析及頻道發布規則不變。
 
+
+# v1.27.13
+
+- 手機管理 App 與網頁控制面板新增 Backblaze B2 備援容量卡片。
+- 顯示已用容量、9.5 GB 上傳門檻、剩餘容量及物件數；未設定或查詢失敗不顯示為零。
+- 不改變 R2／B2 的切換與容量保護規則。
+

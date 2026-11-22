@@ -570,6 +570,10 @@ R2_ENV_KEYS = ("R2_ACCOUNT_ID", "R2_ACCESS_KEY", "R2_SECRET_KEY", "R2_BUCKET",
                "R2_PUBLIC_BASE", "R2_FREE_BYTES", "R2_LIMIT_PERCENT")
 
 
+B2_ENV_KEYS = ("B2_ENDPOINT", "B2_BUCKET", "B2_KEY_ID", "B2_APPLICATION_KEY", "B2_PUBLIC_BASE")
+_b2_usage_cache: dict = {"at": 0.0, "value": None}
+
+
 def _load_env_values() -> int:
     """
     Copy the R2 settings from .env into the environment. Returns how many were set.
@@ -591,7 +595,7 @@ def _load_env_values() -> int:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
-        if key not in R2_ENV_KEYS or key in os.environ:
+        if key not in R2_ENV_KEYS + B2_ENV_KEYS or key in os.environ:
             continue
         os.environ[key] = value.strip().strip('"').strip("'")
         loaded += 1
@@ -670,6 +674,35 @@ def r2_usage(*, force: bool = False) -> dict:
     return result
 
 
+def b2_usage() -> dict:
+    """顯示備援桶可見物件的容量；不回傳金鑰或原始例外。"""
+    now = time.monotonic()
+    if _b2_usage_cache["value"] is not None and now - _b2_usage_cache["at"] < R2_USAGE_TTL:
+        return _b2_usage_cache["value"]
+    try:
+        _load_env_values()
+        bot_dir = str(PROJECT / "bot")
+        if bot_dir not in sys.path:
+            sys.path.insert(0, bot_dir)
+        import r2
+        settings = r2.b2_settings()
+        if settings is None:
+            result = {"state": "unconfigured"}
+        else:
+            used, count = r2.bucket_usage(settings, prefix="", timeout=8.0)
+            limit = r2.B2_LIMIT_BYTES
+            result = {
+                "state": "ok", "used": used, "objects": count, "limit": limit,
+                "used_h": r2.format_bytes(used), "free_h": r2.format_bytes(limit),
+                "remaining_h": r2.format_bytes(max(0, limit - used)),
+                "percent": round(100 * used / limit, 1), "full": used >= limit,
+            }
+    except Exception:
+        result = {"state": "error", "reason": "請檢查 B2 設定、權限與網路"}
+    _b2_usage_cache.update(at=time.monotonic(), value=result)
+    return result
+
+
 def build_status(api_port: int) -> dict:
     bot_up, bot_pid, bot_how = bot_running()
     srv_up, srv_pid, srv_how = server_running(api_port)
@@ -690,6 +723,7 @@ def build_status(api_port: int) -> dict:
         # How full the image host is. Cached for R2_USAGE_TTL, because the app polls this endpoint
         # and a bucket listing per poll would be a round trip to Cloudflare every few seconds.
         "r2": r2_usage(),
+        "b2": b2_usage(),
         "log": {
             "path": str(LOG_FILE),
             "size": LOG_FILE.stat().st_size if LOG_FILE.is_file() else 0,
