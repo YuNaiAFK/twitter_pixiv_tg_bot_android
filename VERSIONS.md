@@ -330,3 +330,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - EH 選單、歸檔、取消、停止及重新生成只接受發起者操作。
 - 舊版群組按鈕請重新傳送連結；同群不同使用者的停止操作互不影響。
 
+
+# v1.27.10
+
+- 選用 Backblaze B2 備援：R2 達容量門檻時，EH 與本機檔案的剩餘圖片改用 B2，不搬遷舊頁面。
+- B2 必須設定公開專用桶及限桶金鑰。未設定時保留原本行為。
+
