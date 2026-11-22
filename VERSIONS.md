@@ -342,3 +342,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 修復 Backblaze B2 上傳相容性：使用路徑式 S3 請求，不送出 B2 不支援的條件式寫入標頭。
 - 保留 B2 上傳前的去重檢查、TLS 憑證驗證及 R2 原有的寫入保護。
 
+
+# v1.27.12
+
+- EH 解析按鈕允許原發起者或 bot 管理員操作；其他成員仍會被拒絕。
+- 管理員停止或重新生成時，操作的是原發起者的任務，群組解析及頻道發布規則不變。
+
