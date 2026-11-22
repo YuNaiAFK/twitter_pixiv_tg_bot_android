@@ -324,3 +324,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 管理員可在私聊使用 `/ehgrant <使用者數字 ID>`，授權立即生效且重啟後保留。
 - 群聊及 X／Pixiv 權限不變。
 
+
+# v1.27.9
+
+- EH 選單、歸檔、取消、停止及重新生成只接受發起者操作。
+- 舊版群組按鈕請重新傳送連結；同群不同使用者的停止操作互不影響。
+
