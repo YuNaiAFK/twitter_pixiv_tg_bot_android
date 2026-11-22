@@ -317,3 +317,10 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - EH 封面網址被 Telegram 拒絕時，下載實際第一張圖並轉成相容 JPEG 直接上傳，仍修改原訊息並保留說明與按鈕。
 - 僅調整訊息封面，不改動 R2 或 Telegraph 原圖；支援 Termux 缺少 Pillow WebP 的系統解碼備援。
+
+# v1.27.8
+
+- 私聊 EH 解析限管理員與明確授權使用者；舊按鈕也會重新檢查權限。
+- 管理員可在私聊使用 `/ehgrant <使用者數字 ID>`，授權立即生效且重啟後保留。
+- 群聊及 X／Pixiv 權限不變。
+
