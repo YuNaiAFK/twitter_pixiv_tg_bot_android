@@ -6895,13 +6895,17 @@ async def host_on_r2(embed: list, gallery, mode: str, status, *, user_id: int | 
 
     phone_urls = {}
     if phone_base:
-        def fetch_for_phone(url):
-            if download_cache is not None and url in download_cache:
-                return download_cache[url][0].read_bytes()
-            return r2.fetch_image(url, timeout=float(R2_UPLOAD_TIMEOUT), referer="https://e-hentai.org/")[0]
+        with httpx.Client(timeout=float(R2_UPLOAD_TIMEOUT), follow_redirects=True) as phone_client:
+            def fetch_for_phone(url):
+                if download_cache is not None and url in download_cache:
+                    return download_cache[url][0].read_bytes()
+                try:
+                    return r2.fetch_image(url, referer="https://e-hentai.org/", http_client=phone_client)[0]
+                except r2.R2Error as exc:
+                    raise ValueError(str(exc)) from exc
 
-        phone_urls = await phone_images.store_with_progress(
-            embed, fetch=fetch_for_phone, edit=status.edit_text, stop_event=stop_event)
+            phone_urls = await phone_images.store_with_progress(
+                embed, fetch=fetch_for_phone, edit=status.edit_text, stop_event=stop_event, workers=4)
         if stop_event is not None and stop_event.is_set():
             raise R2UploadStopped("使用者停止了解析")
         if len(phone_urls) == len(embed):

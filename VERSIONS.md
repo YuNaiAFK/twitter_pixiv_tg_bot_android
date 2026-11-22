@@ -373,3 +373,7 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - 手機圖床在原 Telegram 訊息顯示已處理張數、已儲存張數、耗時及預估剩餘時間。
 
+# v1.29.1
+
+- 加速 EH 多圖存入手機圖床：並行下載並重用 HTTP 連線。
+

@@ -7,6 +7,8 @@ import shutil
 import tempfile
 import threading
 import time
+from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -15,6 +17,8 @@ import httpx
 MAX_STORAGE = 60_000_000_000
 DISK_RESERVE = 2_000_000_000
 _lock = threading.Lock()
+_usage = None
+FETCH_ERRORS = (OSError, ValueError, httpx.HTTPError)
 
 
 def public_base():
@@ -37,7 +41,42 @@ def _suffix(data):
     raise ValueError("手機圖床不支援這種圖片格式")
 
 
-def store_many(urls, *, fetch, stop_event=None, progress=None):
+def _store_one(root, name, data, stop_event):
+    """Dedup and reserve bytes atomically; network requests never hold this lock."""
+    import fcntl
+
+    global _usage
+    target = root / name
+    with _lock, (root.parent / "phone-image-write.lock").open("a+b") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if stop_event is not None and stop_event.is_set():
+            return False
+        if not target.is_symlink() and target.is_file():
+            return True
+        stamp = (root, root.stat().st_mtime_ns)
+        if _usage is None or _usage[0] != stamp:
+            used = sum(p.stat().st_size for p in root.iterdir()
+                       if not p.name.startswith(".") and not p.is_symlink() and p.is_file())
+            _usage = stamp, used
+        used = _usage[1]
+        if used + len(data) > MAX_STORAGE or shutil.disk_usage(root).free < len(data) + DISK_RESERVE:
+            return False
+        tmp = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=root, prefix=".incoming-", delete=False) as out:
+                tmp = Path(out.name)
+                out.write(data)
+            if stop_event is not None and stop_event.is_set():
+                return False
+            tmp.replace(target)
+            _usage = (root, root.stat().st_mtime_ns), used + len(data)
+            return True
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
+
+
+def store_many(urls, *, fetch, stop_event=None, progress=None, workers=1):
     """Return successful image URLs keyed by position; leave remaining images to the caller."""
     base = public_base()
     if not base or not urls:
@@ -50,40 +89,56 @@ def store_many(urls, *, fetch, stop_event=None, progress=None):
             return {}
     except httpx.HTTPError:
         return {}
-    import fcntl
-
     result = {}
     if not root.is_dir():
         return result
-    with _lock, (root.parent / "phone-image-write.lock").open("a+b") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        used = sum(p.stat().st_size for p in root.iterdir() if p.is_file() and not p.is_symlink())
-        for i, source in enumerate(urls):
-            if stop_event is not None and stop_event.is_set():
-                break
-            tmp = None
+
+    def cancelled():
+        return stop_event is not None and stop_event.is_set()
+
+    def load(source):
+        if cancelled():
+            return None
+        try:
+            data = fetch(source)
+            return hashlib.sha256(data).hexdigest() + _suffix(data), data
+        except FETCH_ERRORS:
+            return None
+
+    workers = min(4, max(1, workers), len(urls))
+    pending = deque()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        sources = iter(urls)
+
+        def submit():
+            if not cancelled():
+                try:
+                    source = next(sources)
+                except StopIteration:
+                    return
+                pending.append(pool.submit(load, source))
+
+        for _ in range(workers):
+            submit()
+        i = 0
+        while pending and not cancelled():
             try:
-                data = fetch(source)
-                name = hashlib.sha256(data).hexdigest() + _suffix(data)
-                target = root / name
-                if target.is_symlink() or not target.is_file():
-                    if used + len(data) > MAX_STORAGE or shutil.disk_usage(root).free < len(data) + DISK_RESERVE:
+                entry = pending.popleft().result()
+                if entry is not None:
+                    name, data = entry
+                    if not _store_one(root, name, data, stop_event):
                         break
-                    with tempfile.NamedTemporaryFile(dir=root, prefix=".incoming-", delete=False) as out:
-                        tmp = Path(out.name)
-                        out.write(data)
-                    if stop_event is not None and stop_event.is_set():
-                        break
-                    tmp.replace(target)
-                    used += len(data)
-                result[i] = f"{base}/{name}"
-            except (OSError, ValueError, httpx.HTTPError):
-                continue
+                    result[i] = f"{base}/{name}"
+                    del entry, data
+            except OSError:
+                pass
             finally:
-                if tmp is not None:
-                    tmp.unlink(missing_ok=True)
                 if progress is not None:
                     progress(i + 1, len(result))
+            i += 1
+            submit()
+        for future in pending:
+            future.cancel()
     return result
 
 
@@ -93,7 +148,7 @@ def _duration(seconds):
     return f"{minutes} 分 {seconds:02d} 秒" if minutes else f"{seconds} 秒"
 
 
-async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4):
+async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4, workers=1):
     """Update the existing Telegram status, including during slow downloads or lock waits."""
     total = len(urls)
     state = (0, 0)
@@ -119,7 +174,7 @@ async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4)
 
     await update(progress_text())
     job = asyncio.create_task(asyncio.to_thread(store_many, urls, fetch=fetch,
-                                                stop_event=stop_event, progress=report))
+                                                stop_event=stop_event, progress=report, workers=workers))
     while not job.done():
         await asyncio.wait({job}, timeout=interval)
         if not job.done() and not (stop_event is not None and stop_event.is_set()):

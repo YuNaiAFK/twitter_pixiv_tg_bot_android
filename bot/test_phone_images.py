@@ -10,6 +10,31 @@ import phone_images
 
 
 class PhoneImagesTests(unittest.TestCase):
+    def test_parallel_download_preserves_order_and_cap(self):
+        barrier = threading.Barrier(4, timeout=3)
+        files = [b"GIF89a-" + bytes([i]) for i in range(4)]
+
+        def fetch(i):
+            barrier.wait()
+            return files[i]
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "data" / "public-images"
+            root.mkdir(parents=True)
+            with (
+                patch.dict("os.environ", PHONE_IMAGE_PUBLIC_BASE="https://img.test"),
+                patch.dict(sys.modules, fcntl=SimpleNamespace(flock=Mock(), LOCK_EX=1)),
+                patch.object(phone_images, "__file__", str(Path(directory) / "bot" / "phone_images.py")),
+                patch.object(phone_images, "MAX_STORAGE", 2 * len(files[0])),
+                patch.object(phone_images, "DISK_RESERVE", 0),
+                patch.object(phone_images.httpx, "get", return_value=SimpleNamespace(
+                    status_code=204, headers={"X-Phone-Image-Host": "ready"})),
+            ):
+                urls = phone_images.store_many(list(range(4)), fetch=fetch, workers=4)
+                self.assertEqual(list(urls), [0, 1])
+                self.assertEqual([(root / u.rsplit("/", 1)[-1]).read_bytes()
+                                  for u in urls.values()], files[:2])
+
     def test_duplicate_and_capacity(self):
         first = b"GIF89a-one"
         second = b"GIF89a-two"
@@ -45,7 +70,7 @@ class PhoneProgressTests(unittest.IsolatedAsyncioTestCase):
         edits = []
         observed = threading.Event()
 
-        def worker(urls, *, fetch, stop_event, progress):
+        def worker(urls, *, fetch, stop_event, progress, workers):
             progress(3, 2)
             if not observed.wait(2):
                 raise AssertionError("工作尚未完成時沒有更新進度")
