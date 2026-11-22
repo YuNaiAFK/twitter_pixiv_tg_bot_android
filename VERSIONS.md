@@ -377,3 +377,7 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - 加速 EH 多圖存入手機圖床：並行下載並重用 HTTP 連線。
 
+# v1.30
+
+- EH Telegraph 改由官方 1280 歸檔取得圖片，不再逐頁抓取。
+
