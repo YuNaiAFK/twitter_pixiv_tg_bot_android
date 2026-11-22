@@ -8,6 +8,12 @@ the app are the same release, and numbering them apart would let them drift into
 nobody tested. The app shows its own version and the panel's side by side, both read from that one
 file, so a mismatch is visible rather than a mystery.
 
+## v1.30.1
+
+- 簡化本機檔案製作選單，保留取消；完成後可點檔名開啟 Telegraph。
+- EH 歸檔下載顯示 MB 與平均 MB/s；保留自動修復，暫時無法驗證時不重製。
+- 未設定 R2 時，已設定的 B2 仍可備援。
+
 ## The rule
 
 **Bump it whenever a feature changes.**
