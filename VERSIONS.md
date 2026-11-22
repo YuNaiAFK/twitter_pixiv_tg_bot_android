@@ -336,3 +336,9 @@ exactly one place the number lives and no way for the manifest and the file to d
 - 選用 Backblaze B2 備援：R2 達容量門檻時，EH 與本機檔案的剩餘圖片改用 B2，不搬遷舊頁面。
 - B2 必須設定公開專用桶及限桶金鑰。未設定時保留原本行為。
 
+
+# v1.27.11
+
+- 修復 Backblaze B2 上傳相容性：使用路徑式 S3 請求，不送出 B2 不支援的條件式寫入標頭。
+- 保留 B2 上傳前的去重檢查、TLS 憑證驗證及 R2 原有的寫入保護。
+
