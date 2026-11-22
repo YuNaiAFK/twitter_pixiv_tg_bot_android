@@ -560,9 +560,9 @@ def register(application, runtime):
                 urls = [None] * len(entries)
                 pending = list(range(len(entries)))
                 if phone_base:
-                    await status.edit_text("正在將圖片存入手機圖床……")
-                    local_urls = await asyncio.to_thread(phone_images.store_many, pending,
-                        fetch=lambda i: entries[i][1].read_bytes(), stop_event=batch.stop)
+                    local_urls = await phone_images.store_with_progress(pending,
+                        fetch=lambda i: entries[i][1].read_bytes(), edit=status.edit_text,
+                        stop_event=batch.stop)
                     for i, url in local_urls.items():
                         urls[i] = url
                     pending = [i for i in pending if i not in local_urls]

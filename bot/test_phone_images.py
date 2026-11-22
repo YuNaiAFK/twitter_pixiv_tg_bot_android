@@ -1,5 +1,6 @@
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -37,3 +38,28 @@ class PhoneImagesTests(unittest.TestCase):
         ):
             self.assertEqual(phone_images.store_many(["one"], fetch=fetch), {})
         fetch.assert_not_called()
+
+
+class PhoneProgressTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_message_progress_eta_and_fallback(self):
+        edits = []
+        observed = threading.Event()
+
+        def worker(urls, *, fetch, stop_event, progress):
+            progress(3, 2)
+            if not observed.wait(2):
+                raise AssertionError("工作尚未完成時沒有更新進度")
+            return {0: "a", 1: "b"}
+
+        async def edit(text):
+            edits.append(text)
+            if "已處理 3/5 張" in text:
+                observed.set()
+
+        with patch.object(phone_images, "store_many", side_effect=worker):
+            result = await phone_images.store_with_progress(list(range(5)), fetch=None,
+                                                            edit=edit, interval=.01)
+        self.assertEqual(result, {0: "a", 1: "b"})
+        self.assertIn("已處理 0/5 張", edits[0])
+        self.assertTrue(any("已存 2 張" in text and "預估剩餘" in text for text in edits))
+        self.assertIn("剩餘 3 張交由備援", edits[-1])

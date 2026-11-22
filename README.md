@@ -216,6 +216,8 @@ R2 達 `R2_LIMIT_PERCENT`（預設 95%，以 10 GB 額度計即 9.5 GB）時，E
 
 ## 手機圖床
 
+存入手機圖床時，Bot 會在原訊息更新已處理張數、已儲存張數、耗時和預估剩餘時間。若圖片改用備援，訊息會顯示剩下幾張。
+
 在 Android 專案的 `.env` 設定 `PHONE_IMAGE_PUBLIC_BASE`，新製作的 EH 與本機檔案 Telegraph 頁面會優先把圖片存到手機。手機圖床容量上限為 60 GB（十進位），另保留至少 2 GB 裝置空間。放不進手機或公開圖床未就緒時，尚未存好的圖片接續使用原有的 R2／B2 流程。已發布的 R2 圖片與網址不會搬移或重寫。
 
 Cloudflare Tunnel 的公開主機名稱請指向同一支手機的 `http://127.0.0.1:8092`。將隧道 token 儲存在 Termux 私有路徑 `~/.phone-image-host.token`（權限 600），不要寫進 Git。確認手動運作後，可把 `control/boot-image-host.sh` 安裝到 Termux:Boot 的 `~/.termux/boot/20-image-host.sh`。Windows 版本維持原有的儲存設定。

@@ -365,3 +365,11 @@ exactly one place the number lives and no way for the manifest and the file to d
 
 - Android 支援 60 GB 手機圖床，供新製作的 EH 與本機檔案 Telegraph 頁面優先使用；備援仍依序使用 R2、B2。
 
+# v1.28.1
+
+- 控制台顯示手機圖床用量與 R2 切換門檻。
+
+# v1.29
+
+- 手機圖床在原 Telegram 訊息顯示已處理張數、已儲存張數、耗時及預估剩餘時間。
+

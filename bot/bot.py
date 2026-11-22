@@ -6900,9 +6900,8 @@ async def host_on_r2(embed: list, gallery, mode: str, status, *, user_id: int | 
                 return download_cache[url][0].read_bytes()
             return r2.fetch_image(url, timeout=float(R2_UPLOAD_TIMEOUT), referer="https://e-hentai.org/")[0]
 
-        await status.edit_text("正在將圖片存入手機圖床……")
-        phone_urls = await asyncio.to_thread(phone_images.store_many, embed, fetch=fetch_for_phone,
-                                             stop_event=stop_event)
+        phone_urls = await phone_images.store_with_progress(
+            embed, fetch=fetch_for_phone, edit=status.edit_text, stop_event=stop_event)
         if stop_event is not None and stop_event.is_set():
             raise R2UploadStopped("使用者停止了解析")
         if len(phone_urls) == len(embed):
