@@ -4390,10 +4390,47 @@ async def audit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text(text, link_preview_options=source_link_options())
 
 
+def service_status_lines():
+    """Read-only, on-demand diagnostics; do not repair or change services."""
+    def cache_size(directory, excluded=None):
+        total = 0
+        for path in directory.rglob("*"):
+            if excluded is not None and (path == excluded or excluded in path.parents):
+                continue
+            try:
+                if not path.is_symlink() and path.is_file():
+                    total += path.stat().st_size
+            except OSError:
+                continue
+        return r2.format_bytes(total)
+
+    lines = ["服務狀態", "• Bot：執行中",
+             f"• 解析檔案快取：{cache_size(CACHE_DIR, ARCHIVE_CACHE_DIR)}",
+             f"• 官方歸檔快取：{r2.format_bytes(archive_cache_total_bytes())}"]
+    try:
+        lines.append(f"• 裝置可用空間：{r2.format_bytes(shutil.disk_usage(PROJECT_DIR).free)}")
+    except OSError:
+        lines.append("• 裝置可用空間：無法讀取")
+    import phone_images
+    base = phone_images.public_base()
+    if base:
+        local = phone_images._ready("http://127.0.0.1:8092", local=True)
+        public = phone_images._ready(base)
+        lines.extend([f"• 手機圖床本機：{'正常' if local else '無法連線'}",
+                      f"• 手機圖床公開入口：{'正常' if public else '無法驗證'}"])
+    else:
+        lines.append("• 手機圖床：未設定")
+    for name, settings in (("Cloudflare R2", r2.r2_settings()), ("Backblaze B2", r2.b2_settings())):
+        lines.append(f"• {name}：{'已設定（未測試寫入）' if settings else '未設定'}")
+    return lines
+
+
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Operator summary of the running configuration."""
-    lines = [
-        "執行狀態：",
+    lines = await asyncio.to_thread(service_status_lines)
+    lines += [
+        "",
+        "Bot 設定：",
         "• 支援站點：X/Twitter、Pixiv、e-hentai",
         "• e-hentai 畫廊：轉為 Telegraph 頁面",
         f"• 成人畫廊建立 Telegraph：{'是' if TELEGRAPH_ALLOW_ADULT else '否'}",
@@ -4410,7 +4447,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         *([f"• R2 圖床：免費額度 {r2.format_bytes(r2.free_bytes())}，"
            f"停止上限 {r2.format_bytes(r2.limit_bytes())}"
            f"（{r2.limit_percent():.0f}%）"]
-          if r2.r2_settings() else ["• R2 圖床：未設定（頁面圖片會使用會過期的原始網址）"]),
+          if r2.r2_settings() else ["• R2 圖床：未設定"]),
         "• 同一使用者同時只能有一個請求在處理中",
         # The operator is the only one who sees this message, and /audit is the answer to "is
         # anything I depend on known-broken" - naming it here is how they find out it exists.
@@ -9445,7 +9482,7 @@ async def post_init(application: Application):
         BotCommand("demote", "取消管理員（/demote <ID>）"),
         BotCommand("lockgroup", "群組守門／開放模式"),
         BotCommand("cookies", "登入憑證狀態"),
-        BotCommand("status", "執行狀態"),
+        BotCommand("status", "服務狀態與快取容量"),
         BotCommand("cache", "解析快取狀態／清除"),
         BotCommand("restart", "重新啟動機器人"),
         BotCommand("channels", "查詢或登記 Twitter 目標頻道"),
