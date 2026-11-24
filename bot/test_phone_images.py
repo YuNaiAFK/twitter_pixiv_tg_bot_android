@@ -88,3 +88,18 @@ class PhoneProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("已處理 0/5 張", edits[0])
         self.assertTrue(any("已存 2 張" in text and "預估剩餘" in text for text in edits))
         self.assertIn("剩餘 3 張交由備援", edits[-1])
+
+class PhoneRecoveryTests(unittest.TestCase):
+    def test_restarts_only_tunnel_when_local_origin_is_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            (project / ".phone-image-host.token").touch()
+            with (patch.dict("os.environ", PREFIX="/data/data/com.termux/files/usr"),
+                  patch.object(phone_images, "_repair_after", 0),
+                  patch.object(phone_images.Path, "home", return_value=project),
+                  patch.object(phone_images, "_ready", side_effect=[True, False, True]),
+                  patch.object(phone_images, "_restart_tunnel") as restart,
+                  patch.object(phone_images.subprocess, "run") as start_origin):
+                self.assertTrue(phone_images._recover("https://img.test", project, None))
+                restart.assert_called_once_with(project)
+                start_origin.assert_not_called()

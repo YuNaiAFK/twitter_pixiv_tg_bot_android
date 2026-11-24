@@ -4,6 +4,8 @@ import asyncio
 import logging
 import os
 import shutil
+import signal
+import subprocess
 import tempfile
 import threading
 import time
@@ -18,6 +20,9 @@ MAX_STORAGE = 60_000_000_000
 DISK_RESERVE = 2_000_000_000
 _lock = threading.Lock()
 _usage = None
+_repair_lock = threading.Lock()
+_repair_after = 0.0
+logger = logging.getLogger(__name__)
 FETCH_ERRORS = (OSError, ValueError, httpx.HTTPError)
 
 
@@ -76,18 +81,85 @@ def _store_one(root, name, data, stop_event):
                 tmp.unlink(missing_ok=True)
 
 
+def _ready(base, *, local=False):
+    try:
+        if local:
+            with httpx.Client(trust_env=False, timeout=2) as client:
+                response = client.get(base + "/healthz")
+        else:
+            response = httpx.get(base + "/healthz", timeout=6)
+        return response.status_code == 204 and response.headers.get("X-Phone-Image-Host") == "ready"
+    except httpx.HTTPError:
+        return False
+
+
+def _restart_tunnel(project):
+    # Only signal our own connector, never an unrelated cloudflared or Bot API process.
+    for proc in Path("/proc").iterdir():
+        if not proc.name.isdecimal():
+            continue
+        try:
+            if proc.stat().st_uid != os.getuid() or (proc / "comm").read_text().strip() != "cloudflared":
+                continue
+            args = (proc / "cmdline").read_bytes().split(b"\0")
+            if b"/tmp/phone-image-host.token" in args:
+                os.kill(int(proc.name), signal.SIGTERM)
+        except OSError:
+            continue
+    # The existing launcher uses a lock. Retry briefly if the old proot still holds it.
+    for _ in range(3):
+        with (project / "data/image-tunnel.log").open("ab") as log:
+            child = subprocess.Popen(["bash", str(project / "control/run-image-tunnel.sh")],
+                                     stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+        try:
+            child.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            return
+        time.sleep(1)
+
+
+def _recover(base, project, stop_event):
+    global _repair_after
+    if not os.getenv("PREFIX", "").startswith("/data/data/com.termux/"):
+        return False
+    if stop_event is not None and stop_event.is_set():
+        return False
+    with _repair_lock:
+        if time.monotonic() < _repair_after:
+            return _ready(base)
+        _repair_after = time.monotonic() + 120
+        logger.warning("手機圖床公開入口異常，嘗試自動修復")
+        try:
+            if not _ready("http://127.0.0.1:8092", local=True):
+                subprocess.run(["bash", str(project / "control/run-image-host.sh")],
+                               stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=8)
+            if not _ready(base):
+                if not (Path.home() / ".phone-image-host.token").is_file():
+                    return False
+                if stop_event is not None and stop_event.is_set():
+                    return False
+                _restart_tunnel(project)
+            for _ in range(3):
+                if stop_event is not None and stop_event.is_set():
+                    return False
+                if _ready(base):
+                    logger.info("手機圖床自動修復成功")
+                    return True
+                time.sleep(1)
+        except (OSError, subprocess.SubprocessError):
+            logger.exception("手機圖床自動修復無法完成")
+        logger.warning("手機圖床仍不可用，本次交由備援圖床")
+        return False
+
+
 def store_many(urls, *, fetch, stop_event=None, progress=None, workers=1):
     """Return successful image URLs keyed by position; leave remaining images to the caller."""
     base = public_base()
     if not base or not urls:
         return {}
-    root = Path(__file__).resolve().parent.parent / "data" / "public-images"
-    # A successful HTTPS probe must reach this origin, not a generic CDN 404.
-    try:
-        response = httpx.get(base + "/healthz", timeout=6)
-        if response.status_code != 204 or response.headers.get("X-Phone-Image-Host") != "ready":
-            return {}
-    except httpx.HTTPError:
+    project = Path(__file__).resolve().parent.parent
+    root = project / "data" / "public-images"
+    if not _ready(base) and not _recover(base, project, stop_event):
         return {}
     result = {}
     if not root.is_dir():
