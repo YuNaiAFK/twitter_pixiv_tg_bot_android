@@ -118,14 +118,14 @@ def _restart_tunnel(project):
         time.sleep(1)
 
 
-def _recover(base, project, stop_event):
+def _recover(base, project, stop_event, *, approved=False):
     global _repair_after
     if not os.getenv("PREFIX", "").startswith("/data/data/com.termux/"):
         return False
     if stop_event is not None and stop_event.is_set():
         return False
     with _repair_lock:
-        if time.monotonic() < _repair_after:
+        if not approved and time.monotonic() < _repair_after:
             return _ready(base)
         _repair_after = time.monotonic() + 120
         logger.warning("手機圖床公開入口異常，嘗試自動修復")
@@ -152,14 +152,14 @@ def _recover(base, project, stop_event):
         return False
 
 
-def store_many(urls, *, fetch, stop_event=None, progress=None, workers=1):
+def store_many(urls, *, fetch, stop_event=None, progress=None, workers=1, auto_repair=True):
     """Return successful image URLs keyed by position; leave remaining images to the caller."""
     base = public_base()
     if not base or not urls:
         return {}
     project = Path(__file__).resolve().parent.parent
     root = project / "data" / "public-images"
-    if not _ready(base) and not _recover(base, project, stop_event):
+    if not _ready(base) and not (auto_repair and _recover(base, project, stop_event)):
         return {}
     result = {}
     if not root.is_dir():
@@ -220,7 +220,7 @@ def _duration(seconds):
     return f"{minutes} 分 {seconds:02d} 秒" if minutes else f"{seconds} 秒"
 
 
-async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4, workers=1):
+async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4, workers=1, tunnel_decision=None):
     """Update the existing Telegram status, including during slow downloads or lock waits."""
     total = len(urls)
     state = (0, 0)
@@ -247,9 +247,25 @@ async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4,
         return (f"正在存入手機圖床\n已處理 {done}/{total} 張・已存 {stored} 張\n{bar} {percent}% · {done / max(0.1, elapsed):.2f} 張/s\n"
                 f"已用 {_duration(elapsed)}・{eta}")
 
+    base = public_base()
+    if tunnel_decision is not None and base and urls:
+        project = Path(__file__).resolve().parent.parent
+        ready = await asyncio.to_thread(_ready, base)
+        while not ready and (stop_event is None or not stop_event.is_set()):
+            if await tunnel_decision() != "retry":
+                if stop_event is not None:
+                    stop_event.set()
+                await update("已停止，未繼續使用備援圖床。")
+                return {}
+            await update("正在重啟手機圖床隧道並驗證公開入口……")
+            ready = await asyncio.to_thread(_recover, base, project, stop_event, approved=True)
+        if not ready:
+            return {}
+
     await update(progress_text())
     job = asyncio.create_task(asyncio.to_thread(store_many, urls, fetch=fetch,
-                                                stop_event=stop_event, progress=report, workers=workers))
+                                                stop_event=stop_event, progress=report, workers=workers,
+                                                **({"auto_repair": False} if tunnel_decision else {})))
     while not job.done():
         await asyncio.wait({job}, timeout=interval)
         if not job.done() and not (stop_event is not None and stop_event.is_set()):

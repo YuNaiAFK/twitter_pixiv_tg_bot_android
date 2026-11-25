@@ -103,3 +103,19 @@ class PhoneRecoveryTests(unittest.TestCase):
                 self.assertTrue(phone_images._recover("https://img.test", project, None))
                 restart.assert_called_once_with(project)
                 start_origin.assert_not_called()
+
+class TunnelDecisionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_prevents_storage_and_fallback(self):
+        import threading
+        from unittest.mock import AsyncMock
+        stop = threading.Event()
+        decide = AsyncMock(return_value="stop")
+        with (patch.object(phone_images, "public_base", return_value="https://img.test"),
+              patch.object(phone_images, "_ready", return_value=False),
+              patch.object(phone_images, "store_many") as store):
+            result = await phone_images.store_with_progress(
+                ["one"], fetch=Mock(), edit=AsyncMock(), stop_event=stop, tunnel_decision=decide)
+        self.assertEqual(result, {})
+        self.assertTrue(stop.is_set())
+        decide.assert_awaited_once()
+        store.assert_not_called()

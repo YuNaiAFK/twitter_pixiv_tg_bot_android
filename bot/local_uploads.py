@@ -406,7 +406,11 @@ def register(application, runtime):
                 if phone_base:
                     local_urls = await phone_images.store_with_progress(pending,
                         fetch=lambda i: entries[i][1].read_bytes(), edit=status.edit_text,
-                        stop_event=batch.stop)
+                        stop_event=batch.stop,
+                        tunnel_decision=lambda: runtime["request_r2_retry_decision"](
+                            status, key[1], len(pending), task_name="本機檔案製作", tunnel=True))
+                    if batch.stop.is_set():
+                        raise ValueError("已停止本機檔案製作")
                     for i, url in local_urls.items():
                         urls[i] = url
                     pending = [i for i in pending if i not in local_urls]

@@ -6806,16 +6806,16 @@ R2_DECISION_TIMEOUT_SECONDS = 15 * 60
 _pending_r2_decisions: dict[str, dict] = {}
 
 
-def r2_decision_keyboard(request_id: str) -> InlineKeyboardMarkup:
+def r2_decision_keyboard(request_id: str, *, tunnel=False) -> InlineKeyboardMarkup:
     """Ask the initiating user whether to stop parsing or retry R2 again."""
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("停止解析", callback_data=f"eh|r2|{request_id}|stop"),
-        InlineKeyboardButton("繼續重試", callback_data=f"eh|r2|{request_id}|retry"),
+        InlineKeyboardButton("重啟隧道" if tunnel else "繼續重試", callback_data=f"eh|r2|{request_id}|retry"),
     ]])
 
 
 async def request_r2_retry_decision(status, user_id: int, failed_count: int,
-                                    failure_reason: str = "上傳", task_name: str = "e-hentai 解析") -> str:
+                                    failure_reason: str = "上傳", task_name: str = "e-hentai 解析", *, tunnel=False) -> str:
     """Wait for the request owner to stop this parse or allow another retry cycle."""
     loop = asyncio.get_running_loop()
     request_id = secrets.token_hex(5)
@@ -6828,7 +6828,8 @@ async def request_r2_retry_decision(status, user_id: int, failed_count: int,
         "allow_admin": task_name == "e-hentai 解析",
         "future": future,
     }
-    prompt = (
+    prompt = ("⚠️ 手機圖床的 Cloudflare Tunnel 或公開入口目前無法使用。\n"
+              f"請選擇「重啟隧道」或停止這次{task_name}。" if tunnel else
         f"⚠️ R2 {failure_reason}連續失敗 {R2_FAILURES_BEFORE_PROMPT} 次，"
         f"目前有 {failed_count} 張圖片尚未完成。\n\n"
         f"要停止這次{task_name}，還是再自動重試 3 次？"
@@ -6838,7 +6839,7 @@ async def request_r2_retry_decision(status, user_id: int, failed_count: int,
             await status.edit_text(
                 prompt,
                 link_preview_options=source_link_options(),
-                reply_markup=r2_decision_keyboard(request_id),
+                reply_markup=r2_decision_keyboard(request_id, tunnel=tunnel),
             )
         except TelegramError as exc:
             logger.warning("無法顯示 R2 重試選項：%s", exc)
@@ -6932,6 +6933,7 @@ async def host_on_r2(embed: list, gallery, mode: str, status, *, user_id: int | 
 
     phone_urls = {}
     if phone_base:
+        stop_event = stop_event or threading.Event()
         with httpx.Client(timeout=float(R2_UPLOAD_TIMEOUT), follow_redirects=True) as phone_client:
             def fetch_for_phone(url):
                 if download_cache is not None and url in download_cache:
@@ -6942,7 +6944,9 @@ async def host_on_r2(embed: list, gallery, mode: str, status, *, user_id: int | 
                     raise ValueError(str(exc)) from exc
 
             phone_urls = await phone_images.store_with_progress(
-                embed, fetch=fetch_for_phone, edit=status.edit_text, stop_event=stop_event, workers=4)
+                embed, fetch=fetch_for_phone, edit=status.edit_text, stop_event=stop_event, workers=4,
+                tunnel_decision=(lambda: request_r2_retry_decision(status, user_id, len(embed), tunnel=True))
+                if user_id is not None else None)
         if stop_event is not None and stop_event.is_set():
             raise R2UploadStopped("使用者停止了解析")
         if len(phone_urls) == len(embed):
