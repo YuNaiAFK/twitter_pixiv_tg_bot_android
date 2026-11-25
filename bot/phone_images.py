@@ -252,7 +252,11 @@ async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4,
         project = Path(__file__).resolve().parent.parent
         ready = await asyncio.to_thread(_ready, base)
         while not ready and (stop_event is None or not stop_event.is_set()):
-            if await tunnel_decision() != "retry":
+            choice = await tunnel_decision()
+            if choice == "fallback":
+                await update("已略過手機圖床，改用 R2／B2 備援……")
+                return {}
+            if choice != "retry":
                 if stop_event is not None:
                     stop_event.set()
                 await update("已停止，未繼續使用備援圖床。")

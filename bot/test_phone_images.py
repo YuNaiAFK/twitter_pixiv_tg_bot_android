@@ -119,3 +119,19 @@ class TunnelDecisionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(stop.is_set())
         decide.assert_awaited_once()
         store.assert_not_called()
+
+    async def test_fallback_skips_local_without_stopping(self):
+        import threading
+        from unittest.mock import AsyncMock
+        stop = threading.Event()
+        with (patch.object(phone_images, "public_base", return_value="https://img.test"),
+              patch.object(phone_images, "_ready", return_value=False),
+              patch.object(phone_images, "_recover") as repair,
+              patch.object(phone_images, "store_many") as store):
+            result = await phone_images.store_with_progress(
+                ["one"], fetch=Mock(), edit=AsyncMock(), stop_event=stop,
+                tunnel_decision=AsyncMock(return_value="fallback"))
+        self.assertEqual(result, {})
+        self.assertFalse(stop.is_set())
+        repair.assert_not_called()
+        store.assert_not_called()

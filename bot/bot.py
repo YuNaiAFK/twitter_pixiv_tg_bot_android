@@ -6808,10 +6808,13 @@ _pending_r2_decisions: dict[str, dict] = {}
 
 def r2_decision_keyboard(request_id: str, *, tunnel=False) -> InlineKeyboardMarkup:
     """Ask the initiating user whether to stop parsing or retry R2 again."""
-    return InlineKeyboardMarkup([[
+    rows = [[
         InlineKeyboardButton("停止解析", callback_data=f"eh|r2|{request_id}|stop"),
         InlineKeyboardButton("重啟隧道" if tunnel else "繼續重試", callback_data=f"eh|r2|{request_id}|retry"),
-    ]])
+    ]]
+    if tunnel:
+        rows.append([InlineKeyboardButton("切換到 R2／B2 圖床", callback_data=f"eh|r2|{request_id}|fallback")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def request_r2_retry_decision(status, user_id: int, failed_count: int,
@@ -6826,10 +6829,11 @@ async def request_r2_retry_decision(status, user_id: int, failed_count: int,
         "chat_id": status.chat_id,
         "user_id": (_eh_owner.get() or user_id) if task_name == "e-hentai 解析" else user_id,
         "allow_admin": task_name == "e-hentai 解析",
+        "tunnel": tunnel,
         "future": future,
     }
     prompt = ("⚠️ 手機圖床的 Cloudflare Tunnel 或公開入口目前無法使用。\n"
-              f"請選擇「重啟隧道」或停止這次{task_name}。" if tunnel else
+              f"可重啟隧道、切換到 R2／B2 圖床，或停止這次{task_name}。" if tunnel else
         f"⚠️ R2 {failure_reason}連續失敗 {R2_FAILURES_BEFORE_PROMPT} 次，"
         f"目前有 {failed_count} 張圖片尚未完成。\n\n"
         f"要停止這次{task_name}，還是再自動重試 3 次？"
@@ -6867,7 +6871,7 @@ async def handle_r2_retry_decision(update: Update) -> None:
         return
 
     parts = (query.data or "").split("|")
-    if len(parts) != 4 or parts[:2] != ["eh", "r2"] or parts[3] not in {"stop", "retry"}:
+    if len(parts) != 4 or parts[:2] != ["eh", "r2"] or parts[3] not in {"stop", "retry", "fallback"}:
         await query.answer("這個選項已失效。", show_alert=True)
         return
 
@@ -6884,6 +6888,10 @@ async def handle_r2_retry_decision(update: Update) -> None:
         return
     if pending["user_id"] != user.id and not (pending.get("allow_admin") and user_is_admin(user.id)):
         await query.answer("你沒有權限處理這次重試選項。", show_alert=True)
+        return
+
+    if parts[3] == "fallback" and not pending.get("tunnel"):
+        await query.answer("這個選項已失效。", show_alert=True)
         return
 
     future = pending["future"]
