@@ -241,7 +241,10 @@ async def store_with_progress(urls, *, fetch, edit, stop_event=None, interval=4,
         elapsed = time.monotonic() - started
         eta = (f"預估剩餘約 {_duration(max(1, round(elapsed * (total - done) / done)))}"
                if 3 <= done < total else "正在估算剩餘時間")
-        return (f"正在存入手機圖床\n已處理 {done}/{total} 張・已存 {stored} 張\n"
+        filled = 10 * done // max(1, total)
+        percent = 100 * done // max(1, total)
+        bar = "█" * filled + "░" * (10 - filled)
+        return (f"正在存入手機圖床\n已處理 {done}/{total} 張・已存 {stored} 張\n{bar} {percent}% · {done / max(0.1, elapsed):.2f} 張/s\n"
                 f"已用 {_duration(elapsed)}・{eta}")
 
     await update(progress_text())
